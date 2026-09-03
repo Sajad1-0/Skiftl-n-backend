@@ -224,7 +224,7 @@ importers:
         version: 9.1.0(dotenv@17.4.2)
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(pg@8.22.0)
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.22.0)
       express:
         specifier: ^5.2.1
         version: 5.2.1(supports-color@5.5.0)
@@ -262,6 +262,9 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
       '@types/stripe':
         specifier: ^8.0.417
         version: 8.0.417(@types/node@26.1.2)
@@ -879,6 +882,9 @@ packages:
 
   '@types/node@26.1.2':
     resolution: {integrity: sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg==}
+
+  '@types/pg@8.23.1':
+    resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
   '@types/qs@6.15.1':
     resolution: {integrity: sha512-GZHUBZR9hckSUhrxmp1nG6NwdpM9fCunJwyThLW1X3AyHgd9IlHb6VANpQQqDr2o/qQp6McZ3y/IA2rVzKzSbw==}
@@ -2725,6 +2731,12 @@ snapshots:
     dependencies:
       undici-types: 8.3.0
 
+  '@types/pg@8.23.1':
+    dependencies:
+      '@types/node': 26.1.2
+      pg-protocol: 1.15.0
+      pg-types: 2.2.0
+
   '@types/qs@6.15.1': {}
 
   '@types/range-parser@1.2.7': {}
@@ -3059,8 +3071,9 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.12
 
-  drizzle-orm@0.45.2(pg@8.22.0):
+  drizzle-orm@0.45.2(@types/pg@8.23.1)(pg@8.22.0):
     optionalDependencies:
+      '@types/pg': 8.23.1
       pg: 8.22.0
 
   dunder-proto@1.0.1:
