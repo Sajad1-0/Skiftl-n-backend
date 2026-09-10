@@ -11,19 +11,19 @@ interface PublicJobProfile {
   name: string;
   hourlyWage: number;
   taxRate: string;
-  employerName: string;
+  employerName: string | null;
   isPrimary: boolean;
   createdAt: Date;
 }
 
-function isPublicJobProfile(profile: JobProfile): PublicJobProfile {
+function toPublicJobProfile(profile: JobProfile): PublicJobProfile {
   return {
     id: profile.id,
     userId: profile.userId,
     name: profile.name,
     hourlyWage: profile.hourlyWage,
     taxRate: profile.taxRate,
-    employerName: profile.employerName ?? '',
+    employerName: profile.employerName ?? null,
     isPrimary: profile.isPrimary,
     createdAt: profile.createdAt,
   };
@@ -48,7 +48,7 @@ async function clearPrimaryForUser(userId: string, exceptProfileId?: string): Pr
     await db
       .update(jobProfiles)
       .set({ isPrimary: false })
-      .where(and(eq(jobProfiles.userId, userId), ne(jobProfiles.userId, exceptProfileId)));
+      .where(and(eq(jobProfiles.userId, userId), ne(jobProfiles.id, exceptProfileId)));
     return;
   }
 
@@ -62,10 +62,10 @@ export async function createJobProfile(
   const isPremium = await getUserPremiumStatus(userId);
   const existingCount = await countProfilesForUser(userId);
 
-  if (!isPremium || existingCount >= 1) {
+  if (!isPremium && existingCount >= 1) {
     throw new AppError(
       403,
-      'Gratisplan tillåter bara en jobbprofil. Uppdatera till premium för flera',
+      'Gratisplan tillåter bara en jobbprofil. Uppgradera till premium för flera.',
     );
   }
 
@@ -89,7 +89,7 @@ export async function createJobProfile(
 
   if (!created) throw new AppError(500, 'Kunde inte skapa jobbprofilen');
 
-  return isPublicJobProfile(created);
+  return toPublicJobProfile(created);
 }
 
 export async function listJobProfiles(userId: string): Promise<PublicJobProfile[]> {
@@ -99,7 +99,7 @@ export async function listJobProfiles(userId: string): Promise<PublicJobProfile[
     .where(eq(jobProfiles.userId, userId))
     .orderBy(desc(jobProfiles.isPrimary), desc(jobProfiles.createdAt));
 
-  return profiles.map(isPublicJobProfile);
+  return profiles.map(toPublicJobProfile);
 }
 
 export async function getJobProfileById(
@@ -115,7 +115,7 @@ export async function getJobProfileById(
     throw new AppError(404, 'Jobbprofilen hittades inte');
   }
 
-  return isPublicJobProfile(profile);
+  return toPublicJobProfile(profile);
 }
 
 export async function updateJobProfile(
@@ -124,9 +124,9 @@ export async function updateJobProfile(
   input: UpdateJobProfileInput,
 ): Promise<PublicJobProfile> {
   await getJobProfileById(userId, profileId);
-
-  if (input.isPrimary === true) await clearPrimaryForUser(userId, profileId);
-
+  if (input.isPrimary === true) {
+    await clearPrimaryForUser(userId, profileId);
+  }
   const updated = await db
     .update(jobProfiles)
     .set({
@@ -138,12 +138,11 @@ export async function updateJobProfile(
     })
     .where(and(eq(jobProfiles.id, profileId), eq(jobProfiles.userId, userId)))
     .returning();
-
   const profile = updated[0];
-
-  if (!profile) throw new AppError(404, 'Jobbprofilen hittades inte');
-
-  return isPublicJobProfile(profile);
+  if (!profile) {
+    throw new AppError(404, 'Jobbprofilen hittades inte');
+  }
+  return toPublicJobProfile(profile);
 }
 
 export async function deleteJobProfile(userId: string, profileId: string): Promise<void> {

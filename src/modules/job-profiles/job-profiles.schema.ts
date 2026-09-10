@@ -1,4 +1,3 @@
-import { isPrimary } from 'node:cluster';
 import { z } from 'zod';
 
 export const createJobProfileSchema = z.object({
@@ -14,6 +13,10 @@ export const createJobProfileSchema = z.object({
 });
 
 export const updateJobProfileSchema = createJobProfileSchema.partial();
+
+export const jobProfileIdSchema = z.object({
+  id: z.uuid(),
+});
 
 export type CreateJobProfileInput = z.infer<typeof createJobProfileSchema>;
 export type UpdateJobProfileInput = z.infer<typeof updateJobProfileSchema>;
