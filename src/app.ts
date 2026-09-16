@@ -3,8 +3,9 @@ import cors from 'cors';
 
 import { errorHandler } from './middleware/error.middleware.js';
 import authRoutes from './modules/auth/auth.routes.js';
-import jobProfileRouter from './modules/job-profiles/job-profile.routes.js';
+import jobProfileRoutes from './modules/job-profiles/job-profile.routes.js';
 import healthRoutes from './routes/health.routes.js';
+import shiftsRoutes from './modules/shifts/shifts.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -16,7 +17,8 @@ export function createApp(): Express {
   //Routes
   app.use('/health', healthRoutes);
   app.use('/auth', authRoutes);
-  app.use('/job-profiles', jobProfileRouter);
+  app.use('/job-profiles', jobProfileRoutes);
+  app.use('/shifts', shiftsRoutes);
 
   // Error handler - Måste vara sist
   app.use(errorHandler);
