@@ -100,8 +100,11 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
   const conditions = [eq(shifts.userId, userId)];
 
-  if (query.from) conditions.push(gte(shifts.startAt, query.from));
-  if (query.to) conditions.push(lte(shifts.endAt, query.to));
+  // Overlap [from, to]: include shifts that are still ongoing at `from`
+  // and that have already started by `to`. Containment on startAt/endAt
+  // would drop overnight shifts that cross a month boundary.
+  if (query.from) conditions.push(gte(shifts.endAt, query.from));
+  if (query.to) conditions.push(lte(shifts.startAt, query.to));
 
   const rows = await db
     .select({
