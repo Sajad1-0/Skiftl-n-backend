@@ -14,7 +14,6 @@ import {
   listShifts,
   updateShift,
 } from './shifts.service.js';
-import { success } from 'zod';
 
 function requiredUser(req: Request): string {
   if (!req.user) throw new AppError(401, 'Inte autentiserad');
@@ -92,7 +91,7 @@ export async function getShiftByIdController(
 
     res.status(200).json({
       success: true,
-      message: 'Passet hämtad',
+      message: 'Pass hämtat',
       data: shift,
     });
   } catch (error) {
@@ -110,7 +109,7 @@ export async function updateShiftController(
     const parsedParams = shiftIdSchema.safeParse(req.params);
 
     if (!parsedParams.success) {
-      next(new AppError(400, 'Ogiltig pass-id'));
+      next(new AppError(400, 'Ogiltigt pass-id'));
       return;
     }
 
@@ -143,7 +142,7 @@ export async function deleteShiftController(
     const parsedParams = shiftIdSchema.safeParse(req.params);
 
     if (!parsedParams.success) {
-      next(new AppError(400, 'Ogiltig pass-id'));
+      next(new AppError(400, 'Ogiltigt pass-id'));
       return;
     }
 

@@ -18,6 +18,22 @@ interface PublicShift {
   grossOre: number;
 }
 
+function inclusiveEndBound(date: Date): Date {
+  const isMidnightUtc =
+    date.getUTCHours() === 0 &&
+    date.getUTCMinutes() === 0 &&
+    date.getUTCSeconds() === 0 &&
+    date.getUTCMilliseconds() === 0;
+
+  if (!isMidnightUtc) {
+    return date;
+  }
+
+  const end = new Date(date);
+  end.setUTCHours(23, 59, 59, 999);
+  return end;
+}
+
 function calcWorkMinutes(startAt: Date, endAt: Date, breakMinutes: number): number {
   const total = Math.floor((endAt.getTime() - startAt.getTime()) / 60_000);
   const worked = total - breakMinutes;
@@ -98,13 +114,10 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
-  const conditions = [eq(shifts.userId, userId)];
+  const conditions = [eq(shifts.userId, userId), eq(jobProfiles.userId, userId)];
 
-  // Overlap [from, to]: include shifts that are still ongoing at `from`
-  // and that have already started by `to`. Containment on startAt/endAt
-  // would drop overnight shifts that cross a month boundary.
   if (query.from) conditions.push(gte(shifts.endAt, query.from));
-  if (query.to) conditions.push(lte(shifts.startAt, query.to));
+  if (query.to) conditions.push(lte(shifts.startAt, inclusiveEndBound(query.to)));
 
   const rows = await db
     .select({
