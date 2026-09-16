@@ -93,7 +93,7 @@ export async function getShiftByIdController(
     res.status(200).json({
       success: true,
       message: 'Passet hämtad',
-      body: shift,
+      data: shift,
     });
   } catch (error) {
     next(error);
@@ -126,7 +126,7 @@ export async function updateShiftController(
     res.status(200).json({
       success: true,
       message: 'Passet uppdaterades',
-      body: shift,
+      data: shift,
     });
   } catch (error) {
     next(error);
@@ -152,7 +152,7 @@ export async function deleteShiftController(
     res.status(200).json({
       success: true,
       message: 'Passet togs bort',
-      body: null,
+      data: null,
     });
   } catch (error) {
     next(error);

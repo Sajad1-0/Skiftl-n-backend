@@ -14,8 +14,8 @@ router.use(requireAuth);
 
 router.post('/', createShiftController);
 router.get('/', listShiftsController);
-router.get('/id', getShiftByIdController);
-router.patch('/id', updateShiftController);
-router.delete('/id', deleteShiftController);
+router.get('/:id', getShiftByIdController);
+router.patch('/:id', updateShiftController);
+router.delete('/:id', deleteShiftController);
 
 export default router;
