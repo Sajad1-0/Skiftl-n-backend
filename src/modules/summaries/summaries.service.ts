@@ -58,13 +58,13 @@ export async function getMonthlySummary(
 
   const conditions = [
     eq(shifts.userId, userId),
-    eq(jobProfiles.id, userId),
+    eq(jobProfiles.userId, userId),
     gte(shifts.endAt, from),
     lte(shifts.startAt, to),
   ];
 
   if (query.jobProfileId) {
-    conditions.push(eq(jobProfiles.id, query.jobProfileId));
+    conditions.push(eq(shifts.jobProfileId, query.jobProfileId));
   }
 
   const rows = await db
@@ -127,7 +127,7 @@ export async function getMonthlySummary(
   }
 
   const goalProgressPercent =
-    goalOre && goalOre > 0 ? Math.min(100, Math.round(netOre / goalOre) * 100) : 0;
+    goalOre && goalOre > 0 ? Math.min(100, Math.round((netOre / goalOre) * 100)) : 0;
 
   return {
     from,
