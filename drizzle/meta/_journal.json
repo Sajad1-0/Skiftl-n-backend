@@ -8,6 +8,13 @@
       "when": 1788444234276,
       "tag": "0000_flashy_cobalt_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790149459938,
+      "tag": "0001_foamy_devos",
+      "breakpoints": true
     }
   ]
 }

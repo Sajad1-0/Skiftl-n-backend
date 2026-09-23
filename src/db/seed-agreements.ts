@@ -31,11 +31,11 @@ async function upsertAgreement(code: string, name: string, description: string) 
 }
 
 async function seed() {
-  // Handles-lik mall (skallbarhet)
+  // Handels (även lager/butik under samma avtal — olika jobbprofiler, samma rules)
   const handels = await upsertAgreement(
     'handels_retail',
-    'Handels detaljhandel',
-    'Exempelmall: vardag 18-20 -> 50%, 20-06 -> 70%, söndag/helgdag -> 100%, Inte officiellt avtal',
+    'Handels',
+    'Exempelmall för Handels OB (butik/lager m.m.). Inte officiellt juridiskt bindande avtalstext.',
   );
 
   const hVersions = await db
@@ -84,19 +84,19 @@ async function seed() {
         versionId: hVersion.id,
         dayKind: 'saturday',
         startTime: '12:00:00',
-        endTime: '00:00:00',
+        endTime: '06:00:00', // över midnatt → söndag 06:00
         obPercent: '100.00',
         priority: 20,
-        label: 'Lördag 12-06',
+        label: 'Lördag 12–06',
       },
       {
         versionId: hVersion.id,
         dayKind: 'dayBeforeHoliday',
         startTime: '12:00:00',
-        endTime: '00:00:00',
+        endTime: '06:00:00',
         obPercent: '100.00',
         priority: 20,
-        label: 'Afton dagar 12-06',
+        label: 'Afton 12–06',
       },
       {
         versionId: hVersion.id,
@@ -113,12 +113,13 @@ async function seed() {
         startTime: '00:00:00',
         endTime: '00:00:00',
         obPercent: '100.00',
+        priority: 20,
         label: 'Helgdag',
       },
     ]);
   }
 
-  // SE-helgdagar 2025 (utöka senare)
+  // SE-helgdagar 2026 (senare: importera automatiskt)
   const holidays = [
     { holidayDate: '2026-01-01', name: 'Nyårsdag' },
     { holidayDate: '2026-01-06', name: 'Trettondedag jul' },
@@ -161,3 +162,10 @@ async function seed() {
 
   console.log('Seed klar: handels_retail, public_holidays, dayBeforePublicHolidays');
 }
+
+seed()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

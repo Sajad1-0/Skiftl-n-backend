@@ -50,7 +50,7 @@ export const collectiveAgreementVersions = pgTable(
       .notNull()
       .references(() => collectiveAgreements.id, { onDelete: 'cascade' }),
     label: varchar('label', { length: 100 }).notNull(), // t.ex. "2026"
-    effectiveFrom: timestamp('effective_from', { withTimezone: true, mode: 'date' }),
+    effectiveFrom: timestamp('effective_from', { withTimezone: true, mode: 'date' }).notNull(),
     effectiveTo: timestamp('effective_to', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
@@ -64,13 +64,15 @@ export const collectiveAgreementVersions = pgTable(
  * OB-regel under en avtalsversion.
  * Tider i lokal "klocktid" (Europe/Stockholm i Fas 13).
  * Om endTime <= startTime ⇒ fönstret går över midnatt (t.ex. 20:00–06:00).
+ * Heldag: startTime === endTime === 00:00:00.
  *
  * dayKind:
  *  - weekday  = mån–fre (som inte är helgdag)
  *  - saturday
  *  - sunday
- *  - holiday  = röd dag (public_holidays)
- *  - all      = alla dagar (använd sparsamt)
+ *  - holiday           = röd dag (public_holidays)
+ *  - dayBeforeHoliday  = afton (public_day_before_holidays)
+ *  - all               = alla dagar (använd sparsamt)
  */
 export const obRules = pgTable(
   'ob_rules',
@@ -103,11 +105,11 @@ export const publicHolidays = pgTable(
   },
   (table) => [uniqueIndex('public_holiday_date_region_uidx').on(table.holidayDate, table.region)],
 );
+/** Afton-dagar (dagen före helgdag) — separat lista; kan senare härledas från public_holidays. */
 export const publicDayBeforeHolidays = pgTable(
-  'public_Day_Before_holidays',
+  'public_day_before_holidays',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    // Kalenderdatum i Sverige (ingen tidzon)
     dayBeforeHolidayDate: date('day_before_holiday_date', { mode: 'string' }).notNull(),
     name: varchar('name', { length: 200 }).notNull(),
     region: varchar('region', { length: 64 }).notNull().default('SE'),
@@ -187,8 +189,8 @@ export const usersRelations = relations(users, ({ many }) => ({
 }));
 
 export const collectiveAgreementsRelations = relations(collectiveAgreements, ({ many }) => ({
-  versions: many(jobProfiles),
-  shifts: many(shifts),
+  versions: many(collectiveAgreementVersions),
+  jobProfiles: many(jobProfiles),
 }));
 
 export const collectiveAgreementVersionsRelations = relations(
@@ -204,7 +206,7 @@ export const collectiveAgreementVersionsRelations = relations(
 );
 
 export const obRulesRelations = relations(obRules, ({ one }) => ({
-  versions: one(collectiveAgreementVersions, {
+  version: one(collectiveAgreementVersions, {
     fields: [obRules.versionId],
     references: [collectiveAgreementVersions.id],
   }),
