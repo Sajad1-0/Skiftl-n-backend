@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+/** Max passlängd (inkl. rast) — skyddar OB-motorns minutloop. */
+const MAX_SHIFT_MS = 24 * 60 * 60 * 1000;
+
+function withinMaxDuration(startAt: Date, endAt: Date): boolean {
+  return endAt.getTime() - startAt.getTime() <= MAX_SHIFT_MS;
+}
+
 export const createShiftSchema = z
   .object({
     jobProfileId: z.uuid(),
@@ -10,6 +17,10 @@ export const createShiftSchema = z
   })
   .refine((data) => data.endAt.getTime() > data.startAt.getTime(), {
     message: 'endAt måste vara efter startAt',
+    path: ['endAt'],
+  })
+  .refine((data) => withinMaxDuration(data.startAt, data.endAt), {
+    message: 'Passet får vara högst 24 timmar',
     path: ['endAt'],
   });
 
@@ -29,6 +40,15 @@ export const updateShiftSchema = z
       return true;
     },
     { message: 'endAt måste vara efter startAt', path: ['endAt'] },
+  )
+  .refine(
+    (data) => {
+      if (data.startAt && data.endAt) {
+        return withinMaxDuration(data.startAt, data.endAt);
+      }
+      return true;
+    },
+    { message: 'Passet får vara högst 24 timmar', path: ['endAt'] },
   );
 
 export const shiftIdSchema = z.object({
