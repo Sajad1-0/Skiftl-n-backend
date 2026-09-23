@@ -1,7 +1,10 @@
 import { and, desc, eq, gte, lte } from 'drizzle-orm';
 
 import { db } from '../../db/index.js';
-import { jobProfiles, shifts, type Shift } from '../../db/schema.js';
+import { jobProfiles, shifts, type JobProfile, type Shift } from '../../db/schema.js';
+import { calculateObPay } from '../../lib/ob/engine.js';
+import { loadObPayContext } from '../../lib/ob/context.js';
+import { calcWorkedMinutes } from '../../lib/shift-pay.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { CreateShiftInput, ListShiftsQuery, UpdateShiftInput } from './shifts.schema.js';
 
@@ -15,7 +18,18 @@ interface PublicShift {
   notes: string | null;
   createdAt: Date;
   workedMinutes: number;
+  baseOre: number;
+  obOre: number;
   grossOre: number;
+  agreementVersionId: string | null;
+}
+
+interface ShiftPay {
+  workedMinutes: number;
+  baseOre: number;
+  obOre: number;
+  grossOre: number;
+  agreementVersionId: string | null;
 }
 
 function inclusiveEndBound(date: Date): Date {
@@ -34,20 +48,72 @@ function inclusiveEndBound(date: Date): Date {
   return end;
 }
 
-function calcWorkMinutes(startAt: Date, endAt: Date, breakMinutes: number): number {
-  const total = Math.floor((endAt.getTime() - startAt.getTime()) / 60_000);
-  const worked = total - breakMinutes;
+async function computeShiftPay(
+  profile: JobProfile,
+  startAt: Date,
+  endAt: Date,
+  breakMinutes: number,
+): Promise<ShiftPay> {
+  const workedMinutes = calcWorkedMinutes(startAt, endAt, breakMinutes);
 
-  if (worked <= 0) {
-    throw new AppError(400, 'Rast får inte vara lika lång eller längre än passet');
+  if (!profile.collectiveAgreementId) {
+    const baseOre = Math.round((workedMinutes / 60) * profile.hourlyWage);
+    return {
+      workedMinutes,
+      baseOre,
+      obOre: 0,
+      grossOre: baseOre,
+      agreementVersionId: null,
+    };
   }
 
-  return worked;
+  const ctx = await loadObPayContext(profile.collectiveAgreementId, startAt);
+  if (!ctx) {
+    const baseOre = Math.round((workedMinutes / 60) * profile.hourlyWage);
+    return {
+      workedMinutes,
+      baseOre,
+      obOre: 0,
+      grossOre: baseOre,
+      agreementVersionId: null,
+    };
+  }
+
+  const pay = calculateObPay({
+    startAt,
+    endAt,
+    breakMinutes,
+    hourlyWagesOre: profile.hourlyWage,
+    rules: ctx.rules,
+    holidays: ctx.holiday,
+    dayBeforeHoliday: ctx.dayBeforeHolidays,
+  });
+
+  return {
+    workedMinutes: pay.workedMinutes,
+    baseOre: pay.baseOre,
+    obOre: pay.obOre,
+    grossOre: pay.grossOre,
+    agreementVersionId: ctx.agreementVersionId,
+  };
 }
 
-function toPublicShift(shift: Shift, hourlyWageOre: number): PublicShift {
-  const workedMinutes = calcWorkMinutes(shift.startAt, shift.endAt, shift.breakMinutes);
-  const grossOre = Math.round((workedMinutes / 60) * hourlyWageOre);
+function toPublicShift(shift: Shift, pay?: ShiftPay, hourlyWageOre?: number): PublicShift {
+  const workedMinutes =
+    pay?.workedMinutes ?? calcWorkedMinutes(shift.startAt, shift.endAt, shift.breakMinutes);
+
+  let baseOre = shift.baseOre ?? pay?.baseOre ?? null;
+  let obOre = shift.obOre ?? pay?.obOre ?? null;
+
+  // Gamla rader utan snapshot: räkna enkel grundlön (utan OB) som fallback
+  if (baseOre === null && hourlyWageOre !== undefined) {
+    baseOre = Math.round((workedMinutes / 60) * hourlyWageOre);
+    obOre = 0;
+  }
+
+  const safeBase = baseOre ?? 0;
+  const safeOb = obOre ?? 0;
+  const grossOre = pay?.grossOre ?? safeBase + safeOb;
 
   return {
     id: shift.id,
@@ -59,7 +125,10 @@ function toPublicShift(shift: Shift, hourlyWageOre: number): PublicShift {
     notes: shift.notes ?? null,
     createdAt: shift.createdAt,
     workedMinutes,
+    baseOre: safeBase,
+    obOre: safeOb,
     grossOre,
+    agreementVersionId: shift.agreementVersionId ?? pay?.agreementVersionId ?? null,
   };
 }
 
@@ -91,9 +160,7 @@ async function getOwnedShift(userId: string, shiftId: string): Promise<Shift> {
 
 export async function createShift(userId: string, input: CreateShiftInput): Promise<PublicShift> {
   const profile = await getOwnedJobProfile(userId, input.jobProfileId);
-
-  // Validera rast mot längd (kastar AppError om ogiltigt)
-  calcWorkMinutes(input.startAt, input.endAt, input.breakMinutes);
+  const pay = await computeShiftPay(profile, input.startAt, input.endAt, input.breakMinutes);
 
   const inserted = await db
     .insert(shifts)
@@ -104,13 +171,16 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
       endAt: input.endAt,
       breakMinutes: input.breakMinutes,
       notes: input.notes ?? null,
+      agreementVersionId: pay.agreementVersionId,
+      baseOre: pay.baseOre,
+      obOre: pay.obOre,
     })
     .returning();
 
   const created = inserted[0];
   if (!created) throw new AppError(500, 'Kunde inte skapa passet');
 
-  return toPublicShift(created, profile.hourlyWage);
+  return toPublicShift(created, pay);
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
@@ -129,14 +199,14 @@ export async function listShifts(userId: string, query: ListShiftsQuery): Promis
     .where(and(...conditions))
     .orderBy(desc(shifts.startAt));
 
-  return rows.map((row) => toPublicShift(row.shift, row.hourlyWage));
+  return rows.map((row) => toPublicShift(row.shift, undefined, row.hourlyWage));
 }
 
 export async function getShiftById(userId: string, shiftId: string): Promise<PublicShift> {
   const shift = await getOwnedShift(userId, shiftId);
   const profile = await getOwnedJobProfile(userId, shift.jobProfileId);
 
-  return toPublicShift(shift, profile.hourlyWage);
+  return toPublicShift(shift, undefined, profile.hourlyWage);
 }
 
 export async function updateShift(
@@ -161,7 +231,11 @@ export async function updateShift(
     throw new AppError(400, 'endAt måste vara efter startAt');
   }
 
-  calcWorkMinutes(nextStart, nextEnd, nextBreak);
+  if (nextEnd.getTime() - nextStart.getTime() > 24 * 60 * 60 * 1000) {
+    throw new AppError(400, 'Passet får vara högst 24 timmar');
+  }
+
+  const pay = await computeShiftPay(profile, nextStart, nextEnd, nextBreak);
 
   const updated = await db
     .update(shifts)
@@ -171,6 +245,9 @@ export async function updateShift(
       ...(input.endAt !== undefined ? { endAt: input.endAt } : {}),
       ...(input.breakMinutes !== undefined ? { breakMinutes: input.breakMinutes } : {}),
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
+      agreementVersionId: pay.agreementVersionId,
+      baseOre: pay.baseOre,
+      obOre: pay.obOre,
     })
     .where(and(eq(shifts.id, shiftId), eq(shifts.userId, userId)))
     .returning();
@@ -178,7 +255,7 @@ export async function updateShift(
   const shift = updated[0];
   if (!shift) throw new AppError(404, 'Passet hittades inte');
 
-  return toPublicShift(shift, profile.hourlyWage);
+  return toPublicShift(shift, pay);
 }
 
 export async function deleteShift(userId: string, shiftId: string): Promise<void> {

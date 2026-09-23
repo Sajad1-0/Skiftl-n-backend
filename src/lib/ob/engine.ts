@@ -51,7 +51,7 @@ function pickObPercent(rules: ObRuleInput[], dayKind: DayKind, localMinutes: num
 
   for (const rule of rules) {
     if (rule.dayKind !== dayKind && rule.dayKind !== 'all') continue;
-    if (timeMatchesWindow(localMinutes, rule.startTime, rule.endTime)) continue;
+    if (!timeMatchesWindow(localMinutes, rule.startTime, rule.endTime)) continue;
 
     if (
       !best ||
@@ -93,3 +93,100 @@ export function paidIntervall(
  * Minut-för-minut i Europe/Stockholm.
  * Bra för korrekthet; pass är korta (timmar).
  */
+export function calculateObPay(input: {
+  startAt: Date;
+  endAt: Date;
+  breakMinutes: number;
+  hourlyWagesOre: number;
+  rules: ObRuleInput[];
+  holidays: Set<string>;
+  dayBeforeHoliday: Set<string>;
+}): ObPayResult {
+  const intervals = paidIntervall(input.startAt, input.endAt, input.breakMinutes);
+  const wagePerMinute = input.hourlyWagesOre / 60;
+
+  let workedMinutes = 0;
+  let baseOreExact = 0;
+  let obOreExact = 0;
+
+  const segments: ObSegment[] = [];
+  let cur: {
+    start: Date;
+    end: Date;
+    obPercent: number;
+    dayKind: DayKind;
+    minutes: number;
+  } | null = null;
+
+  function flush() {
+    if (!cur || cur.minutes <= 0) {
+      cur = null;
+      return;
+    }
+
+    const base = Math.round(cur.minutes * wagePerMinute);
+    const ob = Math.round(cur.minutes * wagePerMinute * (cur.obPercent / 100));
+    segments.push({
+      startAt: cur.start.toISOString(),
+      endAt: cur.end.toISOString(),
+      minutes: cur.minutes,
+      obPercent: cur.obPercent,
+      dayKind: cur.dayKind,
+      baseOre: base,
+      obOre: ob,
+    });
+    cur = null;
+  }
+
+  for (const { start, end } of intervals) {
+    let t = start.getTime();
+    const endMs = end.getTime();
+
+    while (t < endMs) {
+      const instant = new Date(t);
+      const local = dayjs(instant).tz(TZ);
+      const dateKey = local.format('YYYY-MM-DD');
+      const dayKind = resolveDayKind(dateKey, input.holidays, input.dayBeforeHoliday);
+      const localMinutes = local.hour() * 60 + local.minute();
+      const obPercent = pickObPercent(input.rules, dayKind, localMinutes);
+
+      workedMinutes += 1;
+      baseOreExact += wagePerMinute;
+      obOreExact += wagePerMinute * (obPercent / 100);
+
+      const next = t + 60_000;
+
+      if (
+        cur &&
+        cur.obPercent === obPercent &&
+        cur.dayKind === dayKind &&
+        cur.end.getTime() === t
+      ) {
+        cur.end = new Date(next);
+        cur.minutes += 1;
+      } else {
+        flush();
+        cur = {
+          start: instant,
+          end: new Date(next),
+          obPercent,
+          dayKind,
+          minutes: 1,
+        };
+      }
+      t = next;
+    }
+  }
+  flush();
+
+  const baseOre = Math.round(baseOreExact);
+  const obOre = Math.round(obOreExact);
+
+  return {
+    workedMinutes,
+    baseOre,
+    obOre,
+    grossOre: baseOre + obOre,
+    segments,
+  };
+}
