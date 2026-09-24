@@ -19,6 +19,8 @@ export interface ProfileBreakdown {
   shiftCount: number;
   workedMinutes: number;
   breakMinutes: number;
+  baseOre: number;
+  obOre: number;
   grossOre: number;
   netOre: number;
 }
@@ -29,12 +31,35 @@ export interface MonthlySummary {
   shiftCount: number;
   workedMinutes: number;
   breakMinutes: number;
+  baseOre: number;
+  obOre: number;
   grossOre: number;
   netOre: number;
   goalOre: number | null;
   // Progress mot nettomål (0-100). 0 om inget mål.
   goalProgressPercent: number;
   byJobProfile: ProfileBreakdown[];
+}
+
+function shiftPaySnapshot(
+  startAt: Date,
+  endAt: Date,
+  breakMinutes: number,
+  hourlyWage: number,
+  storedBase: number | null,
+  storedOb: number | null,
+): { workedMinutes: number; baseOre: number; obOre: number; grossOre: number } {
+  const workedMinutes = calcWorkedMinutes(startAt, endAt, breakMinutes);
+
+  if (storedBase != null) {
+    const baseOre = storedBase;
+    const obOre = storedOb ?? 0;
+    return { workedMinutes, baseOre, obOre, grossOre: baseOre + obOre };
+  }
+
+  // Gamla rader före OB-engine
+  const baseOre = calcGrossOre(workedMinutes, hourlyWage);
+  return { workedMinutes, baseOre, obOre: 0, grossOre: baseOre };
 }
 
 export async function getMonthlySummary(
@@ -91,26 +116,38 @@ export async function getMonthlySummary(
 
   let workedMinutes = 0;
   let breakMinutes = 0;
+  let baseOre = 0;
+  let obOre = 0;
   let grossOre = 0;
   let netOre = 0;
 
   for (const row of rows) {
-    const minutes = calcWorkedMinutes(row.shift.startAt, row.shift.endAt, row.shift.breakMinutes);
     const tax = parseTaxRate(row.taxRate);
-    const gross = calcGrossOre(minutes, row.hourlyWage);
-    const net = calcNetOre(gross, tax);
+    const pay = shiftPaySnapshot(
+      row.shift.startAt,
+      row.shift.endAt,
+      row.shift.breakMinutes,
+      row.hourlyWage,
+      row.shift.baseOre ?? null,
+      row.shift.obOre ?? null,
+    );
+    const net = calcNetOre(pay.grossOre, tax);
 
-    workedMinutes += minutes;
+    workedMinutes += pay.workedMinutes;
     breakMinutes += row.shift.breakMinutes;
-    grossOre += gross;
+    baseOre += pay.baseOre;
+    obOre += pay.obOre;
+    grossOre += pay.grossOre;
     netOre += net;
 
     const existing = byProfile.get(row.profileId);
     if (existing) {
       existing.shiftCount += 1;
-      existing.workedMinutes += minutes;
+      existing.workedMinutes += pay.workedMinutes;
       existing.breakMinutes += row.shift.breakMinutes;
-      existing.grossOre += gross;
+      existing.baseOre += pay.baseOre;
+      existing.obOre += pay.obOre;
+      existing.grossOre += pay.grossOre;
       existing.netOre += net;
     } else {
       byProfile.set(row.profileId, {
@@ -118,9 +155,11 @@ export async function getMonthlySummary(
         name: row.profileName,
         taxRate: tax,
         shiftCount: 1,
-        workedMinutes: minutes,
+        workedMinutes: pay.workedMinutes,
         breakMinutes: row.shift.breakMinutes,
-        grossOre: gross,
+        baseOre: pay.baseOre,
+        obOre: pay.obOre,
+        grossOre: pay.grossOre,
         netOre: net,
       });
     }
@@ -135,6 +174,8 @@ export async function getMonthlySummary(
     shiftCount: rows.length,
     workedMinutes,
     breakMinutes,
+    baseOre,
+    obOre,
     grossOre,
     netOre,
     goalOre,
