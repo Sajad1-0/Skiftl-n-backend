@@ -10,6 +10,7 @@ export const createJobProfileSchema = z.object({
     .transform((value) => value.toFixed(2)),
   employerName: z.string().trim().min(2).max(200).optional(),
   isPrimary: z.boolean().optional(),
+  collectiveAgreementId: z.uuid().nullable().optional(),
 });
 
 export const updateJobProfileSchema = createJobProfileSchema.partial();

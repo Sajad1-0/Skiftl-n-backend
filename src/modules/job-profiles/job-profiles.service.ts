@@ -3,7 +3,7 @@ import { and, desc, eq, ne } from 'drizzle-orm';
 import type { CreateJobProfileInput, UpdateJobProfileInput } from './job-profiles.schema.js';
 import { db } from '../../db/index.js';
 import { AppError } from '../../middleware/error.middleware.js';
-import { jobProfiles, users, type JobProfile } from '../../db/schema.js';
+import { collectiveAgreements, jobProfiles, users, type JobProfile } from '../../db/schema.js';
 
 interface PublicJobProfile {
   id: string;
@@ -13,6 +13,7 @@ interface PublicJobProfile {
   taxRate: string;
   employerName: string | null;
   isPrimary: boolean;
+  collectiveAgreementId: string | null;
   createdAt: Date;
 }
 
@@ -25,8 +26,23 @@ function toPublicJobProfile(profile: JobProfile): PublicJobProfile {
     taxRate: profile.taxRate,
     employerName: profile.employerName ?? null,
     isPrimary: profile.isPrimary,
+    collectiveAgreementId: profile.collectiveAgreementId ?? null,
     createdAt: profile.createdAt,
   };
+}
+
+async function assertActiveAgreement(agreementId: string | null | undefined): Promise<void> {
+  if (agreementId == null) return;
+
+  const matched = await db
+    .select({ id: collectiveAgreements.id })
+    .from(collectiveAgreements)
+    .where(and(eq(collectiveAgreements.id, agreementId), eq(collectiveAgreements.isActive, true)))
+    .limit(1);
+
+  if (!matched[0]) {
+    throw new AppError(400, 'Kollektivavtalet hittades inte');
+  }
 }
 
 async function getUserPremiumStatus(userId: string): Promise<boolean> {
@@ -69,6 +85,8 @@ export async function createJobProfile(
     );
   }
 
+  await assertActiveAgreement(input.collectiveAgreementId);
+
   const shouldBePrimary = existingCount === 0 ? true : (input.isPrimary ?? false);
 
   if (shouldBePrimary) await clearPrimaryForUser(userId);
@@ -82,6 +100,7 @@ export async function createJobProfile(
       taxRate: input.taxRate,
       employerName: input.employerName ?? null,
       isPrimary: shouldBePrimary,
+      collectiveAgreementId: input.collectiveAgreementId ?? null,
     })
     .returning();
 
@@ -135,6 +154,9 @@ export async function updateJobProfile(
       ...(input.taxRate !== undefined ? { taxRate: input.taxRate } : {}),
       ...(input.employerName !== undefined ? { employerName: input.employerName } : {}),
       ...(input.isPrimary !== undefined ? { isPrimary: input.isPrimary } : {}),
+      ...(input.collectiveAgreementId !== undefined
+        ? { collectiveAgreementId: input.collectiveAgreementId }
+        : {}),
     })
     .where(and(eq(jobProfiles.id, profileId), eq(jobProfiles.userId, userId)))
     .returning();
