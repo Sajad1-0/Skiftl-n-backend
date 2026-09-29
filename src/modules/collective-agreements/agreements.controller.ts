@@ -2,7 +2,6 @@ import type { NextFunction, Request, Response } from 'express';
 
 import { AppError } from '../../middleware/error.middleware.js';
 import { listActiveAgreements } from './agreements.service.js';
-import { success } from 'zod';
 
 function requiredUser(req: Request): string {
   if (!req.user) throw new AppError(401, 'Inte autentiserad');

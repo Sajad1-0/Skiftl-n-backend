@@ -143,6 +143,11 @@ export async function updateJobProfile(
   input: UpdateJobProfileInput,
 ): Promise<PublicJobProfile> {
   await getJobProfileById(userId, profileId);
+
+  if (input.collectiveAgreementId !== undefined) {
+    await assertActiveAgreement(input.collectiveAgreementId);
+  }
+
   if (input.isPrimary === true) {
     await clearPrimaryForUser(userId, profileId);
   }
