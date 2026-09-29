@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 
 import { db } from './index.js';
 import {
@@ -10,6 +10,24 @@ import {
   publicDayBeforeHolidays,
   publicHolidays,
 } from './schema.js';
+import {
+  HANDELS_AFTON_DATES,
+  HANDELS_AGREEMENT_CODE,
+  HANDELS_AGREEMENT_DESCRIPTION,
+  HANDELS_AGREEMENT_NAME,
+  HANDELS_EFFECTIVE_FROM,
+  HANDELS_EFFECTIVE_TO,
+  HANDELS_OB_RULES,
+  HANDELS_VERSION_LABEL,
+} from '../lib/ob/handels-detaljhandel.js';
+
+function assertSeedAllowed(): void {
+  if (process.env.NODE_ENV === 'production' && process.env.CONFIRM_SEED !== '1') {
+    throw new Error(
+      'Vägrar köra seed i production utan CONFIRM_SEED=1 (destruktiv uppdatering av OB-regler/aftnar).',
+    );
+  }
+}
 
 async function upsertAgreement(code: string, name: string, description: string) {
   const existing = await db
@@ -18,7 +36,14 @@ async function upsertAgreement(code: string, name: string, description: string) 
     .where(eq(collectiveAgreements.code, code))
     .limit(1);
 
-  if (existing[0]) return existing[0];
+  if (existing[0]) {
+    const updated = await db
+      .update(collectiveAgreements)
+      .set({ name, description, isActive: true })
+      .where(eq(collectiveAgreements.id, existing[0].id))
+      .returning();
+    return updated[0]!;
+  }
 
   const inserted = await db
     .insert(collectiveAgreements)
@@ -30,137 +55,120 @@ async function upsertAgreement(code: string, name: string, description: string) 
   return row;
 }
 
-async function seed() {
-  // Handels (även lager/butik under samma avtal — olika jobbprofiler, samma rules)
-  const handels = await upsertAgreement(
-    'handels_retail',
-    'Handels',
-    'Exempelmall för Handels OB (butik/lager m.m.). Inte officiellt juridiskt bindande avtalstext.',
-  );
-
-  const hVersions = await db
+async function upsertHandelsVersion(agreementId: string) {
+  const existing = await db
     .select()
     .from(collectiveAgreementVersions)
-    .where(eq(collectiveAgreementVersions.agreementId, handels.id))
+    .where(eq(collectiveAgreementVersions.agreementId, agreementId))
+    .orderBy(desc(collectiveAgreementVersions.effectiveFrom))
     .limit(1);
 
-  let hVersion = hVersions[0];
-  if (!hVersion) {
-    const inserted = await db
-      .insert(collectiveAgreementVersions)
-      .values({
-        agreementId: handels.id,
-        label: '2026',
-        effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
-        effectiveTo: null,
+  if (existing[0]) {
+    const updated = await db
+      .update(collectiveAgreementVersions)
+      .set({
+        label: HANDELS_VERSION_LABEL,
+        effectiveFrom: HANDELS_EFFECTIVE_FROM,
+        effectiveTo: HANDELS_EFFECTIVE_TO,
       })
+      .where(eq(collectiveAgreementVersions.id, existing[0].id))
       .returning();
-
-    hVersion = inserted[0]!;
+    return updated[0]!;
   }
 
-  const hRules = await db.select().from(obRules).where(eq(obRules.versionId, hVersion.id));
-  if (hRules.length === 0) {
-    await db.insert(obRules).values([
-      {
-        versionId: hVersion.id,
-        dayKind: 'weekday',
-        startTime: '18:00:00',
-        endTime: '20:00:00',
-        obPercent: '50.00',
-        priority: 10,
-        label: 'Vardag 18-20',
-      },
-      {
-        versionId: hVersion.id,
-        dayKind: 'weekday',
-        startTime: '20:00:00',
-        endTime: '06:00:00',
-        obPercent: '70.00',
-        priority: 10,
-        label: 'Vardag 20-06',
-      },
-      {
-        versionId: hVersion.id,
-        dayKind: 'saturday',
-        startTime: '12:00:00',
-        endTime: '06:00:00', // över midnatt → söndag 06:00
-        obPercent: '100.00',
-        priority: 20,
-        label: 'Lördag 12–06',
-      },
-      {
-        versionId: hVersion.id,
-        dayKind: 'dayBeforeHoliday',
-        startTime: '12:00:00',
-        endTime: '06:00:00',
-        obPercent: '100.00',
-        priority: 20,
-        label: 'Afton 12–06',
-      },
-      {
-        versionId: hVersion.id,
-        dayKind: 'sunday',
-        startTime: '00:00:00',
-        endTime: '00:00:00',
-        obPercent: '100.00',
-        priority: 20,
-        label: 'Söndag',
-      },
-      {
-        versionId: hVersion.id,
-        dayKind: 'holiday',
-        startTime: '00:00:00',
-        endTime: '00:00:00',
-        obPercent: '100.00',
-        priority: 20,
-        label: 'Helgdag',
-      },
-    ]);
-  }
+  const inserted = await db
+    .insert(collectiveAgreementVersions)
+    .values({
+      agreementId,
+      label: HANDELS_VERSION_LABEL,
+      effectiveFrom: HANDELS_EFFECTIVE_FROM,
+      effectiveTo: HANDELS_EFFECTIVE_TO,
+    })
+    .returning();
 
-  // SE-helgdagar 2026 (senare: importera automatiskt)
-  const holidays = [
-    { holidayDate: '2026-01-01', name: 'Nyårsdag' },
-    { holidayDate: '2026-01-06', name: 'Trettondedag jul' },
-    { holidayDate: '2026-04-03', name: 'Långfredagen' },
-    { holidayDate: '2026-04-05', name: 'Påskdagen' },
-    { holidayDate: '2026-04-06', name: 'Annandag påsk' },
-    { holidayDate: '2026-05-01', name: 'Första maj' },
-    { holidayDate: '2026-05-14', name: 'Kristi himmelsfärdag' },
-    { holidayDate: '2026-05-24', name: 'Pingstdagen' },
-    { holidayDate: '2026-06-06', name: 'Nationaldagen' },
-    { holidayDate: '2026-06-20', name: 'Midsommardagen' },
-    { holidayDate: '2026-10-31', name: 'Alla helgons dag' },
-    { holidayDate: '2026-12-25', name: 'Juldagen' },
-    { holidayDate: '2026-12-26', name: 'Annandag jul' },
-  ];
+  const row = inserted[0];
+  if (!row) throw new Error('Kunde inte skapa avtalsversion');
+  return row;
+}
 
-  // 100% OB efter kl 12:00
-  const dayBeforeHolidays = [
-    { dayBeforeHolidayDate: '2026-01-05', name: 'Trettondagsafton' },
-    { dayBeforeHolidayDate: '2026-04-04', name: 'Påskafton' },
-    { dayBeforeHolidayDate: '2026-06-19', name: 'Midsommarafton' },
-    { dayBeforeHolidayDate: '2026-10-30', name: 'Alla helgons afton' },
-    { dayBeforeHolidayDate: '2026-12-24', name: 'Jul afton' },
-    { dayBeforeHolidayDate: '2026-12-31', name: 'Nyårsafton' },
-  ];
+async function seed() {
+  assertSeedAllowed();
 
-  for (const h of holidays) {
-    await db
-      .insert(publicHolidays)
-      .values({ ...h, region: 'SE' })
-      .onConflictDoNothing();
-  }
+  const handels = await upsertAgreement(
+    HANDELS_AGREEMENT_CODE,
+    HANDELS_AGREEMENT_NAME,
+    HANDELS_AGREEMENT_DESCRIPTION,
+  );
 
-  for (const dbh of dayBeforeHolidays) {
-    await db
-      .insert(publicDayBeforeHolidays)
-      .values({ ...dbh, region: 'SE' })
-      .onConflictDoNothing();
-  }
+  const hVersion = await upsertHandelsVersion(handels.id);
 
-  console.log('Seed klar: handels_retail, public_holidays, dayBeforePublicHolidays');
+  await db.transaction(async (tx) => {
+    await tx.delete(obRules).where(eq(obRules.versionId, hVersion.id));
+
+    await tx.insert(obRules).values(
+      HANDELS_OB_RULES.map((rule) => ({
+        versionId: hVersion.id,
+        dayKind: rule.dayKind,
+        startTime: rule.startTime.length === 5 ? `${rule.startTime}:00` : rule.startTime,
+        endTime: rule.endTime.length === 5 ? `${rule.endTime}:00` : rule.endTime,
+        obPercent: rule.obPercent.toFixed(2),
+        priority: rule.priority,
+        label: rule.label ?? null,
+      })),
+    );
+
+    // SE-helgdagar 2025–2027 (avtalsperioden)
+    const holidays = [
+      { holidayDate: '2025-01-01', name: 'Nyårsdag' },
+      { holidayDate: '2025-01-06', name: 'Trettondedag jul' },
+      { holidayDate: '2025-04-18', name: 'Långfredagen' },
+      { holidayDate: '2025-04-20', name: 'Påskdagen' },
+      { holidayDate: '2025-04-21', name: 'Annandag påsk' },
+      { holidayDate: '2025-05-01', name: 'Första maj' },
+      { holidayDate: '2025-05-29', name: 'Kristi himmelsfärdsdag' },
+      { holidayDate: '2025-06-06', name: 'Nationaldagen' },
+      { holidayDate: '2025-06-08', name: 'Pingstdagen' },
+      { holidayDate: '2025-06-21', name: 'Midsommardagen' },
+      { holidayDate: '2025-11-01', name: 'Alla helgons dag' },
+      { holidayDate: '2025-12-25', name: 'Juldagen' },
+      { holidayDate: '2025-12-26', name: 'Annandag jul' },
+      { holidayDate: '2026-01-01', name: 'Nyårsdag' },
+      { holidayDate: '2026-01-06', name: 'Trettondedag jul' },
+      { holidayDate: '2026-04-03', name: 'Långfredagen' },
+      { holidayDate: '2026-04-05', name: 'Påskdagen' },
+      { holidayDate: '2026-04-06', name: 'Annandag påsk' },
+      { holidayDate: '2026-05-01', name: 'Första maj' },
+      { holidayDate: '2026-05-14', name: 'Kristi himmelsfärdsdag' },
+      { holidayDate: '2026-05-24', name: 'Pingstdagen' },
+      { holidayDate: '2026-06-06', name: 'Nationaldagen' },
+      { holidayDate: '2026-06-20', name: 'Midsommardagen' },
+      { holidayDate: '2026-10-31', name: 'Alla helgons dag' },
+      { holidayDate: '2026-12-25', name: 'Juldagen' },
+      { holidayDate: '2026-12-26', name: 'Annandag jul' },
+      { holidayDate: '2027-01-01', name: 'Nyårsdag' },
+      { holidayDate: '2027-01-06', name: 'Trettondedag jul' },
+    ];
+
+    for (const h of holidays) {
+      await tx
+        .insert(publicHolidays)
+        .values({ ...h, region: 'SE' })
+        .onConflictDoNothing();
+    }
+
+    // Ersätt SE-aftnar: bara jul/nyår/midsommar enligt § 8.1
+    await tx.delete(publicDayBeforeHolidays).where(eq(publicDayBeforeHolidays.region, 'SE'));
+
+    for (const afton of HANDELS_AFTON_DATES) {
+      await tx.insert(publicDayBeforeHolidays).values({
+        dayBeforeHolidayDate: afton.date,
+        name: afton.name,
+        region: 'SE',
+      });
+    }
+  });
+
+  console.log('Seed klar: handels_retail (§ 8.1), SE-helgdagar, aftnar (jul/nyår/midsommar)');
 }
 
 seed()
