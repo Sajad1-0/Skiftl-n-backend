@@ -11,7 +11,6 @@ import {
   publicHolidays,
 } from './schema.js';
 import {
-  HANDELS_AFTON_DATES,
   HANDELS_AGREEMENT_CODE,
   HANDELS_AGREEMENT_DESCRIPTION,
   HANDELS_AGREEMENT_NAME,
@@ -20,6 +19,7 @@ import {
   HANDELS_OB_RULES,
   HANDELS_VERSION_LABEL,
 } from '../lib/ob/handels-detaljhandel.js';
+import { syncSwedishHolidayCalendar } from '../lib/holidays/sync.js';
 
 function assertSeedAllowed(): void {
   if (process.env.NODE_ENV === 'production' && process.env.CONFIRM_SEED !== '1') {
@@ -117,55 +117,9 @@ async function seed() {
       })),
     );
 
-    // SE-helgdagar 2025–2027 (avtalsperioden)
-    const holidays = [
-      { holidayDate: '2025-01-01', name: 'Nyårsdag' },
-      { holidayDate: '2025-01-06', name: 'Trettondedag jul' },
-      { holidayDate: '2025-04-18', name: 'Långfredagen' },
-      { holidayDate: '2025-04-20', name: 'Påskdagen' },
-      { holidayDate: '2025-04-21', name: 'Annandag påsk' },
-      { holidayDate: '2025-05-01', name: 'Första maj' },
-      { holidayDate: '2025-05-29', name: 'Kristi himmelsfärdsdag' },
-      { holidayDate: '2025-06-06', name: 'Nationaldagen' },
-      { holidayDate: '2025-06-08', name: 'Pingstdagen' },
-      { holidayDate: '2025-06-21', name: 'Midsommardagen' },
-      { holidayDate: '2025-11-01', name: 'Alla helgons dag' },
-      { holidayDate: '2025-12-25', name: 'Juldagen' },
-      { holidayDate: '2025-12-26', name: 'Annandag jul' },
-      { holidayDate: '2026-01-01', name: 'Nyårsdag' },
-      { holidayDate: '2026-01-06', name: 'Trettondedag jul' },
-      { holidayDate: '2026-04-03', name: 'Långfredagen' },
-      { holidayDate: '2026-04-05', name: 'Påskdagen' },
-      { holidayDate: '2026-04-06', name: 'Annandag påsk' },
-      { holidayDate: '2026-05-01', name: 'Första maj' },
-      { holidayDate: '2026-05-14', name: 'Kristi himmelsfärdsdag' },
-      { holidayDate: '2026-05-24', name: 'Pingstdagen' },
-      { holidayDate: '2026-06-06', name: 'Nationaldagen' },
-      { holidayDate: '2026-06-20', name: 'Midsommardagen' },
-      { holidayDate: '2026-10-31', name: 'Alla helgons dag' },
-      { holidayDate: '2026-12-25', name: 'Juldagen' },
-      { holidayDate: '2026-12-26', name: 'Annandag jul' },
-      { holidayDate: '2027-01-01', name: 'Nyårsdag' },
-      { holidayDate: '2027-01-06', name: 'Trettondedag jul' },
-    ];
-
-    for (const h of holidays) {
-      await tx
-        .insert(publicHolidays)
-        .values({ ...h, region: 'SE' })
-        .onConflictDoNothing();
-    }
-
-    // Ersätt SE-aftnar: bara jul/nyår/midsommar enligt § 8.1
-    await tx.delete(publicDayBeforeHolidays).where(eq(publicDayBeforeHolidays.region, 'SE'));
-
-    for (const afton of HANDELS_AFTON_DATES) {
-      await tx.insert(publicDayBeforeHolidays).values({
-        dayBeforeHolidayDate: afton.date,
-        name: afton.name,
-        region: 'SE',
-      });
-    }
+    const fromYear = HANDELS_EFFECTIVE_FROM.getUTCFullYear();
+    const toYear = HANDELS_EFFECTIVE_TO.getUTCFullYear();
+    await syncSwedishHolidayCalendar(fromYear, toYear);
   });
 
   console.log('Seed klar: handels_retail (§ 8.1), SE-helgdagar, aftnar (jul/nyår/midsommar)');

@@ -13,7 +13,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:push": "drizzle-kit push",
-    "db:seed:agreements": "tsx src/db/seed-agreements.ts"
+    "db:seed:agreements": "tsx src/db/seed-agreements.ts",
+    "db:seed:holidays": "tsx src/db/seed-holidays.ts"
   },
   "keywords": [],
   "author": "",
