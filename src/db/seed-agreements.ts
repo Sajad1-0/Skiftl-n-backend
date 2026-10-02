@@ -3,13 +3,7 @@ import 'dotenv/config';
 import { desc, eq } from 'drizzle-orm';
 
 import { db } from './index.js';
-import {
-  collectiveAgreements,
-  collectiveAgreementVersions,
-  obRules,
-  publicDayBeforeHolidays,
-  publicHolidays,
-} from './schema.js';
+import { collectiveAgreements, collectiveAgreementVersions, obRules } from './schema.js';
 import {
   HANDELS_AGREEMENT_CODE,
   HANDELS_AGREEMENT_DESCRIPTION,
@@ -102,6 +96,9 @@ async function seed() {
 
   const hVersion = await upsertHandelsVersion(handels.id);
 
+  const fromYear = HANDELS_EFFECTIVE_FROM.getUTCFullYear();
+  const toYear = HANDELS_EFFECTIVE_TO.getUTCFullYear();
+
   await db.transaction(async (tx) => {
     await tx.delete(obRules).where(eq(obRules.versionId, hVersion.id));
 
@@ -117,9 +114,8 @@ async function seed() {
       })),
     );
 
-    const fromYear = HANDELS_EFFECTIVE_FROM.getUTCFullYear();
-    const toYear = HANDELS_EFFECTIVE_TO.getUTCFullYear();
-    await syncSwedishHolidayCalendar(fromYear, toYear);
+    // Samma transaction → OB-regler + helgkalender commitas tillsammans
+    await syncSwedishHolidayCalendar(fromYear, toYear, tx);
   });
 
   console.log('Seed klar: handels_retail (§ 8.1), SE-helgdagar, aftnar (jul/nyår/midsommar)');

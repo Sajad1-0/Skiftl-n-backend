@@ -1,4 +1,5 @@
 import 'dotenv/config';
+
 import { syncSwedishHolidayCalendar } from '../lib/holidays/sync.js';
 
 function assertSeedAllowed(): void {
@@ -15,6 +16,10 @@ async function main() {
 
   if (!Number.isInteger(fromYear) || !Number.isInteger(toYear)) {
     throw new Error('Användning: pnpm db:seed:holidays [fromYear] [toYear]');
+  }
+
+  if (fromYear < 1900 || toYear > 2100 || toYear < fromYear) {
+    throw new Error('År måste vara 1900–2100 och toYear >= fromYear');
   }
 
   const result = await syncSwedishHolidayCalendar(fromYear, toYear);
