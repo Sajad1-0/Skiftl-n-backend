@@ -74,12 +74,3 @@ export const HANDELS_OB_RULES: ObRuleInput[] = [
     label: 'Helgdag',
   },
 ];
-
-export const HANDELS_AFTON_DATES: Array<{ date: string; name: string }> = [
-  { date: '2025-06-20', name: 'Midsommarafton' },
-  { date: '2025-12-24', name: 'Julafton' },
-  { date: '2025-12-31', name: 'Nyårsafton' },
-  { date: '2026-06-19', name: 'Midsommarafton' },
-  { date: '2026-12-24', name: 'Julafton' },
-  { date: '2026-12-31', name: 'Nyårsafton' },
-];
