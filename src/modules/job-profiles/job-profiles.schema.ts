@@ -13,7 +13,9 @@ export const createJobProfileSchema = z.object({
   collectiveAgreementId: z.uuid().nullable().optional(),
 });
 
-export const updateJobProfileSchema = createJobProfileSchema.partial();
+export const updateJobProfileSchema = createJobProfileSchema.partial().extend({
+  employerName: z.union([z.string().trim().min(2).max(200), z.null()]).optional(),
+});
 
 export const jobProfileIdSchema = z.object({
   id: z.uuid(),
