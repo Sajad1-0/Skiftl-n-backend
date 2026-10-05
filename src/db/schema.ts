@@ -1,4 +1,5 @@
 import { relations } from 'drizzle-orm';
+import { year } from 'drizzle-orm/mysql-core';
 import {
   boolean,
   date,
@@ -182,6 +183,45 @@ export const shifts = pgTable(
   ],
 );
 
+/**
+ * Skatteverkets skattetabell (månadslön).
+ * Belopp i öre. dayType "30B" = kronorskatt; "30%" = procent (höga inkomster).
+ */
+export const taxTableBrackets = pgTable(
+  'tax_table_brackets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    year: smallint('year').notNull(),
+    dayType: varchar('day_type', { length: 8 }).notNull(), // '30B' | '30%'
+    tableNumber: smallint('table_number').notNull(),
+    incomeFromOre: integer('income_from_ore').notNull(),
+    incomeToOre: integer('income_to_ore').notNull(),
+    /** true = kolumnvärden är procent (30%), false = skatt i öre (30B) */
+    taxIsPercent: boolean('tax_is_percent').notNull().default(false),
+    taxCol1: integer('tax_col_1').notNull(),
+    taxCol2: integer('tax_col_2').notNull(),
+    taxCol3: integer('tax_col_3').notNull(),
+    taxCol4: integer('tax_col_4').notNull(),
+    taxCol5: integer('tax_col_5').notNull(),
+    taxCol6: integer('tax_col_6').notNull(),
+  },
+  (table) => [
+    index('tax_brackets_lookup_idx').on(
+      table.year,
+      table.dayType,
+      table.tableNumber,
+      table.incomeFromOre,
+    ),
+    uniqueIndex('tax_brackets_range_uidx').on(
+      table.year,
+      table.dayType,
+      table.tableNumber,
+      table.incomeFromOre,
+      table.incomeToOre,
+    ),
+  ],
+);
+
 // Relations (För Drizzle queries med .with())
 export const usersRelations = relations(users, ({ many }) => ({
   jobProfiles: many(jobProfiles),
@@ -251,3 +291,5 @@ export type NewShift = typeof shifts.$inferInsert;
 
 export type CollectiveAgreement = typeof collectiveAgreements.$inferSelect;
 export type ObRule = typeof obRules.$inferSelect;
+
+export type TaxTableBracket = typeof taxTableBrackets.$inferSelect;
