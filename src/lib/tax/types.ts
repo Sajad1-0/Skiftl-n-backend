@@ -24,7 +24,7 @@ export interface TaxLookupInput {
   // Månadsbrutto i öre
   grossOre: number;
   // Default 30B - ordinär månadstabell
-  dayType?: TaxDayType;
+  dayType?: TaxDayType | undefined;
 }
 
 export interface TaxLookupResult {
