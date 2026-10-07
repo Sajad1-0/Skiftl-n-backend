@@ -21,9 +21,22 @@ function columnTax(bracket: TaxBracket, column: TaxColumn): number {
   }
 }
 
+/** Skatteverket-band är hela kronor; undvik 99-öre-hål mellan seedade intervall. */
+function oreToWholeKronor(ore: number): number {
+  return Math.floor(ore / 100);
+}
+
+function bracketContainsGross(bracket: TaxBracket, grossOre: number): boolean {
+  const grossKr = oreToWholeKronor(grossOre);
+  const fromKr = oreToWholeKronor(bracket.incomeFromOre);
+  const toKr = oreToWholeKronor(bracket.incomeToOre);
+  return grossKr >= fromKr && grossKr <= toKr;
+}
+
 /**
  * Hitta bracket för grossOre bland redan filtrerade rader (samma year/table/dayType).
  * grossOre = 0 → skatt 0 (inga pass ännu).
+ * Matchar på hela kronor (CSV-gränser), så belopp som 2100,50 kr inte faller mellan band.
  */
 export function taxForGrossFromBrackets(
   brackets: TaxBracket[],
@@ -31,7 +44,7 @@ export function taxForGrossFromBrackets(
 ): TaxLookupResult {
   const { year, tableNumber, column, grossOre, dayType = '30B' } = input;
 
-  if (grossOre < 0) throw new Error('grossOre får inte vara negative');
+  if (grossOre < 0) throw new Error('grossOre får inte vara negativ');
 
   if (grossOre === 0) {
     return { taxOre: 0, incomeFromOre: 0, incomeToOre: 0, taxIsPercent: false };
@@ -42,8 +55,7 @@ export function taxForGrossFromBrackets(
       b.year === year &&
       b.tableNumber === tableNumber &&
       b.dayType === dayType &&
-      grossOre >= b.incomeFromOre &&
-      grossOre <= b.incomeToOre,
+      bracketContainsGross(b, grossOre),
   );
 
   if (matching.length === 0) {

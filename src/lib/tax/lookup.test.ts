@@ -25,7 +25,8 @@ const fixture: TaxBracket[] = [
     year: 2026,
     dayType: '30B',
     tableNumber: 33,
-    incomeFromOre: 15_000_01,
+    // Som CSV: nästa band börjar 15001 kr → 99 öre-hål om man matchar rått i öre
+    incomeFromOre: 15_001_00,
     incomeToOre: 17_000_00,
     taxIsPercent: false,
     taxCol1: 2_500_00,
@@ -91,6 +92,17 @@ describe('tax lookup', () => {
     });
     assert.equal(r.taxIsPercent, true);
     assert.equal(r.taxOre, 35_000_00);
+  });
+
+  it('15000.50 kr (öre-hål mellan band) → första bracket via hela kronor', () => {
+    const r = taxForGrossFromBrackets(fixture, {
+      year: 2026,
+      tableNumber: 33,
+      column: 1,
+      grossOre: 15_000_50,
+    });
+    assert.equal(r.taxOre, 2_000_00);
+    assert.equal(r.incomeToOre, 15_000_00);
   });
 });
 
