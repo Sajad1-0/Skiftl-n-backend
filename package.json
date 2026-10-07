@@ -14,7 +14,8 @@
     "db:studio": "drizzle-kit studio",
     "db:push": "drizzle-kit push",
     "db:seed:agreements": "tsx src/db/seed-agreements.ts",
-    "db:seed:holidays": "tsx src/db/seed-holidays.ts"
+    "db:seed:holidays": "tsx src/db/seed-holidays.ts",
+    "db:seed:tax-tables": "tsx src/db/seed-tax-tables.ts"
   },
   "keywords": [],
   "author": "",

@@ -47,9 +47,9 @@ export function taxForGrossFromBrackets(
   );
 
   if (matching.length === 0) {
-    // försök 30%-forsättning om 30B missade (hög inkomster)
+    // 30B tar slut ~80k kr — fortsätt med 30%-rader (procent av brutto)
     if (dayType === '30B') {
-      return taxForGrossFromBrackets(brackets, { ...input });
+      return taxForGrossFromBrackets(brackets, { ...input, dayType: '30%' });
     }
     throw new Error(
       `Ingen skattetabell för year=${year} table=${tableNumber} dayType=${dayType} grossOre=${grossOre}`,

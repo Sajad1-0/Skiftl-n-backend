@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 
 import type { TaxBracket, TaxDayType } from './types.js';
 
+/** Tom "Inkomst t.o.m." = öppet intervall uppåt (max Postgres integer). */
+export const OPEN_ENDED_INCOME_TO_ORE = 2_147_483_647;
+
 function kronorToOre(kronor: number): number {
   return Math.round(kronor * 100);
 }
@@ -15,7 +18,8 @@ function parseIntOrZero(raw: string): number {
 
 /**
  * Parsar Skatteverkets semikolon-CSV (latin1).
- * Hoppar över rader utan giltigt inkomstintervall.
+ * Hoppar över rader utan giltigt from-belopp.
+ * Tom to-kolumn → öppet intervall (högsta 30%-raden per tabell).
  */
 export function parseSkattetabellCsv(csvText: string): TaxBracket[] {
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -31,9 +35,12 @@ export function parseSkattetabellCsv(csvText: string): TaxBracket[] {
     const dayTypeRaw = cols[1]!.trim();
     const tableNumber = parseIntOrZero(cols[2]!);
     const fromKr = parseIntOrZero(cols[3]!);
-    const toKr = parseIntOrZero(cols[4]!);
+    const toRaw = cols[4]!.trim();
+    const openEnded = toRaw.length === 0;
+    const toKr = openEnded ? 0 : parseIntOrZero(toRaw);
 
-    if (!year || !tableNumber || fromKr <= 0 || toKr <= 0 || toKr < fromKr) continue;
+    if (!year || !tableNumber || fromKr <= 0) continue;
+    if (!openEnded && (toKr <= 0 || toKr < fromKr)) continue;
     if (dayTypeRaw !== '30B' && dayTypeRaw !== '30%') continue;
 
     const dayType = dayTypeRaw as TaxDayType;
@@ -51,7 +58,7 @@ export function parseSkattetabellCsv(csvText: string): TaxBracket[] {
       dayType,
       tableNumber,
       incomeFromOre: kronorToOre(fromKr),
-      incomeToOre: kronorToOre(toKr),
+      incomeToOre: openEnded ? OPEN_ENDED_INCOME_TO_ORE : kronorToOre(toKr),
       taxIsPercent,
       // 30B: kronor → öre. 30%: procent lämnas som heltal (t.ex. 30).
       taxCol1: taxIsPercent ? c1 : kronorToOre(c1),
