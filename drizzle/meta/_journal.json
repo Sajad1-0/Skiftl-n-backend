@@ -15,6 +15,13 @@
       "when": 1790149459938,
       "tag": "0001_foamy_devos",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791370906050,
+      "tag": "0002_safe_hawkeye",
+      "breakpoints": true
     }
   ]
 }
