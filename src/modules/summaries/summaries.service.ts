@@ -1,7 +1,10 @@
-import { eq, and, gte, lte } from 'drizzle-orm';
+import { and, eq, gte, lte } from 'drizzle-orm';
 
 import { db } from '../../db/index.js';
-import { jobProfiles, users, shifts } from '../../db/schema.js';
+import { jobProfiles, shifts, users } from '../../db/schema.js';
+import { loadTaxBrackets } from '../../lib/tax/load-brackets.js';
+import { taxForGrossFromBrackets } from '../../lib/tax/lookup.js';
+import type { TaxColumn } from '../../lib/tax/types.js';
 import {
   calcGrossOre,
   calcNetOre,
@@ -10,6 +13,7 @@ import {
   parseTaxRate,
 } from '../../lib/shift-pay.js';
 import { AppError } from '../../middleware/error.middleware.js';
+import { getTaxSettings } from '../tax-settings/tax-settings.service.js';
 import type { MonthlySummaryQuery } from './summaries.schema.js';
 
 export interface ProfileBreakdown {
@@ -34,9 +38,12 @@ export interface MonthlySummary {
   baseOre: number;
   obOre: number;
   grossOre: number;
+  /** Skatt i öre (månadsnivå vid tabell, annars summa av flat) */
+  taxOre: number;
   netOre: number;
+  /** table = skattetabell; flat = jobbprofilens taxRate */
+  taxMode: 'table' | 'flat';
   goalOre: number | null;
-  // Progress mot nettomål (0-100). 0 om inget mål.
   goalProgressPercent: number;
   byJobProfile: ProfileBreakdown[];
 }
@@ -57,9 +64,38 @@ function shiftPaySnapshot(
     return { workedMinutes, baseOre, obOre, grossOre: baseOre + obOre };
   }
 
-  // Gamla rader före OB-engine
   const baseOre = calcGrossOre(workedMinutes, hourlyWage);
   return { workedMinutes, baseOre, obOre: 0, grossOre: baseOre };
+}
+
+function asTaxColumn(n: number): TaxColumn {
+  if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5 || n === 6) return n;
+  throw new AppError(400, 'Ogiltig skattekolumn (1–6)');
+}
+
+/** Fördela månadsnetto proportionellt efter brutto (sista profilen får resten). */
+function allocateNetByGross(
+  profiles: ProfileBreakdown[],
+  totalGrossOre: number,
+  totalNetOre: number,
+): void {
+  if (profiles.length === 0) return;
+
+  if (totalGrossOre <= 0) {
+    for (const p of profiles) p.netOre = 0;
+    return;
+  }
+
+  let allocated = 0;
+  for (let i = 0; i < profiles.length; i++) {
+    const profile = profiles[i]!;
+    if (i === profiles.length - 1) {
+      profile.netOre = totalNetOre - allocated;
+    } else {
+      profile.netOre = Math.round((profile.grossOre / totalGrossOre) * totalNetOre);
+      allocated += profile.netOre;
+    }
+  }
 }
 
 export async function getMonthlySummary(
@@ -119,7 +155,7 @@ export async function getMonthlySummary(
   let baseOre = 0;
   let obOre = 0;
   let grossOre = 0;
-  let netOre = 0;
+  let flatNetOre = 0;
 
   for (const row of rows) {
     const tax = parseTaxRate(row.taxRate);
@@ -131,14 +167,14 @@ export async function getMonthlySummary(
       row.shift.baseOre ?? null,
       row.shift.obOre ?? null,
     );
-    const net = calcNetOre(pay.grossOre, tax);
+    const flatNet = calcNetOre(pay.grossOre, tax);
 
     workedMinutes += pay.workedMinutes;
     breakMinutes += row.shift.breakMinutes;
     baseOre += pay.baseOre;
     obOre += pay.obOre;
     grossOre += pay.grossOre;
-    netOre += net;
+    flatNetOre += flatNet;
 
     const existing = byProfile.get(row.profileId);
     if (existing) {
@@ -148,7 +184,7 @@ export async function getMonthlySummary(
       existing.baseOre += pay.baseOre;
       existing.obOre += pay.obOre;
       existing.grossOre += pay.grossOre;
-      existing.netOre += net;
+      existing.netOre += flatNet;
     } else {
       byProfile.set(row.profileId, {
         jobProfileId: row.profileId,
@@ -160,9 +196,38 @@ export async function getMonthlySummary(
         baseOre: pay.baseOre,
         obOre: pay.obOre,
         grossOre: pay.grossOre,
-        netOre: net,
+        netOre: flatNet,
       });
     }
+  }
+
+  const settings = await getTaxSettings(userId);
+  let taxMode: 'table' | 'flat' = 'flat';
+  let taxOre = grossOre - flatNetOre;
+  let netOre = flatNetOre;
+  const profiles = [...byProfile.values()].sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+
+  if (settings) {
+    const brackets = await loadTaxBrackets(settings.taxYear, settings.tableNumber);
+    if (brackets.length === 0) {
+      throw new AppError(
+        400,
+        'Skattetabell saknas för valt år/tabellnummer. Kör pnpm db:seed:tax-tables.',
+      );
+    }
+
+    const lookup = taxForGrossFromBrackets(brackets, {
+      year: settings.taxYear,
+      tableNumber: settings.tableNumber,
+      column: asTaxColumn(settings.columnNumber),
+      grossOre,
+      dayType: settings.dayType === '30%' ? '30%' : '30B',
+    });
+
+    taxMode = 'table';
+    taxOre = lookup.taxOre;
+    netOre = grossOre - taxOre;
+    allocateNetByGross(profiles, grossOre, netOre);
   }
 
   const goalProgressPercent =
@@ -177,9 +242,11 @@ export async function getMonthlySummary(
     baseOre,
     obOre,
     grossOre,
+    taxOre,
     netOre,
+    taxMode,
     goalOre,
     goalProgressPercent,
-    byJobProfile: [...byProfile.values()].sort((a, b) => a.name.localeCompare(b.name, 'sv')),
+    byJobProfile: profiles,
   };
 }

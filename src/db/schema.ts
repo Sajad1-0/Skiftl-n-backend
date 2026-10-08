@@ -1,5 +1,4 @@
 import { relations } from 'drizzle-orm';
-import { year } from 'drizzle-orm/mysql-core';
 import {
   boolean,
   date,
@@ -222,10 +221,28 @@ export const taxTableBrackets = pgTable(
   ],
 );
 
+export const userTaxSettings = pgTable('user_tax_settings', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  taxYear: smallint('tax_year').notNull(),
+  tableNumber: smallint('table_number').notNull(),
+  columnNumber: smallint('column_number').notNull().default(1),
+  dayType: varchar('day_type', { length: 8 }).notNull().default('30B'),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
 // Relations (För Drizzle queries med .with())
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ many, one }) => ({
   jobProfiles: many(jobProfiles),
   shifts: many(shifts),
+  taxSettings: one(userTaxSettings, {
+    fields: [users.id],
+    references: [userTaxSettings.userId],
+  }),
 }));
 
 export const collectiveAgreementsRelations = relations(collectiveAgreements, ({ many }) => ({
@@ -279,6 +296,13 @@ export const shiftsRelations = relations(shifts, ({ one }) => ({
   }),
 }));
 
+export const userTaxSettingsRelations = relations(userTaxSettings, ({ one }) => ({
+  user: one(users, {
+    fields: [userTaxSettings.userId],
+    references: [users.id],
+  }),
+}));
+
 // Infererade TypeScript-typer
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -293,3 +317,5 @@ export type CollectiveAgreement = typeof collectiveAgreements.$inferSelect;
 export type ObRule = typeof obRules.$inferSelect;
 
 export type TaxTableBracket = typeof taxTableBrackets.$inferSelect;
+
+export type UserTaxSettings = typeof userTaxSettings.$inferSelect;
