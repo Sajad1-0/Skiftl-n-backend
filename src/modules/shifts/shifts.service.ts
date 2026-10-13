@@ -4,11 +4,18 @@ import { db } from '../../db/index.js';
 import { jobProfiles, shifts, type JobProfile, type Shift } from '../../db/schema.js';
 import { calculateObPay } from '../../lib/ob/engine.js';
 import { loadObPayContext } from '../../lib/ob/context.js';
-import { calcWorkedMinutes } from '../../lib/shift-pay.js';
+import { calcWorkedMinutes, parseTaxRate } from '../../lib/shift-pay.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { CreateShiftInput, ListShiftsQuery, UpdateShiftInput } from './shifts.schema.js';
+import { attachEstimateNets, resolveTableCtx } from '../../lib/shift-estimate-nets.js';
+import {
+  sameStockholmMonth,
+  stockholmMonthQueryRange,
+  stockholmYearMonth,
+} from '../../lib/tax/month-bounds.js';
+import { estimateShiftNetOre } from '../../lib/tax/estimate-shift-net.js';
 
-interface PublicShift {
+export interface PublicShift {
   id: string;
   userId: string;
   jobProfileId: string;
@@ -22,6 +29,7 @@ interface PublicShift {
   obOre: number;
   grossOre: number;
   agreementVersionId: string | null;
+  estimatedNetOre: number | null;
 }
 
 interface ShiftPay {
@@ -129,6 +137,7 @@ function toPublicShift(shift: Shift, pay?: ShiftPay, hourlyWageOre?: number): Pu
     obOre: safeOb,
     grossOre,
     agreementVersionId: shift.agreementVersionId ?? pay?.agreementVersionId ?? null,
+    estimatedNetOre: null,
   };
 }
 
@@ -180,7 +189,53 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
   const created = inserted[0];
   if (!created) throw new AppError(500, 'Kunde inte skapa passet');
 
-  return toPublicShift(created, pay);
+  const publicShift = toPublicShift(created, pay);
+
+  const { from, to } = stockholmMonthQueryRange(created.startAt);
+  // Join profil så legacy-rader utan snapshot får samma brutto-fallback som listShifts
+  const prior = await db
+    .select({
+      shift: shifts,
+      hourlyWage: jobProfiles.hourlyWage,
+    })
+    .from(shifts)
+    .innerJoin(jobProfiles, eq(shifts.jobProfileId, jobProfiles.id))
+    .where(
+      and(
+        eq(shifts.userId, userId),
+        eq(jobProfiles.userId, userId),
+        gte(shifts.startAt, from),
+        lte(shifts.startAt, to),
+      ),
+    );
+
+  let grossBefore = 0;
+  for (const row of prior) {
+    const p = row.shift;
+    if (p.id === created.id) continue;
+    if (!sameStockholmMonth(p.startAt, created.startAt)) continue;
+    // Samma starttid: räkna in tidigare rader via id-ordning (stabil)
+    if (
+      p.startAt.getTime() > created.startAt.getTime() ||
+      (p.startAt.getTime() === created.startAt.getTime() && p.id.localeCompare(created.id) >= 0)
+    ) {
+      continue;
+    }
+    const pub = toPublicShift(p, undefined, row.hourlyWage);
+    grossBefore += pub.grossOre;
+  }
+
+  const tableCtx = await resolveTableCtx(userId);
+  const flat = parseTaxRate(profile.taxRate);
+
+  const estimatedNetOre = estimateShiftNetOre({
+    shiftGrossOre: publicShift.grossOre,
+    grossBeforeOre: grossBefore,
+    ...(tableCtx ? { table: tableCtx } : {}),
+    ...(!tableCtx ? { flatTaxRatePercent: flat } : {}),
+  });
+
+  return { ...publicShift, estimatedNetOre };
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
@@ -193,13 +248,72 @@ export async function listShifts(userId: string, query: ListShiftsQuery): Promis
     .select({
       shift: shifts,
       hourlyWage: jobProfiles.hourlyWage,
+      taxRate: jobProfiles.taxRate,
     })
     .from(shifts)
     .innerJoin(jobProfiles, eq(shifts.jobProfileId, jobProfiles.id))
     .where(and(...conditions))
     .orderBy(desc(shifts.startAt));
 
-  return rows.map((row) => toPublicShift(row.shift, undefined, row.hourlyWage));
+  const taxRateByProfileId = new Map<string, number>();
+  const publics = rows.map((row) => {
+    taxRateByProfileId.set(row.shift.jobProfileId, parseTaxRate(row.taxRate));
+    return toPublicShift(row.shift, undefined, row.hourlyWage);
+  });
+
+  // Om from/to klippt listan: ladda hela Stockholm-månaden för korrekt G₀
+  const monthContext =
+    query.from || query.to
+      ? await loadMonthContextShifts(userId, publics, taxRateByProfileId)
+      : publics;
+
+  return attachEstimateNets(userId, publics, taxRateByProfileId, monthContext);
+}
+
+/** Alla pass i Stockholm-månaderna som `anchors` täcker (för korrekt marginal). */
+async function loadMonthContextShifts(
+  userId: string,
+  anchors: PublicShift[],
+  taxRateByProfileId: Map<string, number>,
+): Promise<PublicShift[]> {
+  if (anchors.length === 0) return [];
+
+  const monthKeys = new Set(
+    anchors.map((s) => {
+      const { year, month } = stockholmYearMonth(s.startAt);
+      return `${year}-${month}`;
+    }),
+  );
+
+  const ranges = anchors.map((s) => stockholmMonthQueryRange(s.startAt));
+  const from = new Date(Math.min(...ranges.map((r) => r.from.getTime())));
+  const to = new Date(Math.max(...ranges.map((r) => r.to.getTime())));
+
+  const rows = await db
+    .select({
+      shift: shifts,
+      hourlyWage: jobProfiles.hourlyWage,
+      taxRate: jobProfiles.taxRate,
+    })
+    .from(shifts)
+    .innerJoin(jobProfiles, eq(shifts.jobProfileId, jobProfiles.id))
+    .where(
+      and(
+        eq(shifts.userId, userId),
+        eq(jobProfiles.userId, userId),
+        gte(shifts.startAt, from),
+        lte(shifts.startAt, to),
+      ),
+    );
+
+  const context: PublicShift[] = [];
+  for (const row of rows) {
+    const { year, month } = stockholmYearMonth(row.shift.startAt);
+    if (!monthKeys.has(`${year}-${month}`)) continue;
+    taxRateByProfileId.set(row.shift.jobProfileId, parseTaxRate(row.taxRate));
+    context.push(toPublicShift(row.shift, undefined, row.hourlyWage));
+  }
+  return context;
 }
 
 export async function getShiftById(userId: string, shiftId: string): Promise<PublicShift> {
