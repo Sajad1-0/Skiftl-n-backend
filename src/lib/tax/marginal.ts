@@ -10,7 +10,7 @@ export interface MarginalNetInput {
   grossBeforeOre: number;
   /** Detta pass brutto (öre) */
   shiftGrossOre: number;
-  dayType?: TaxDayType;
+  dayType?: TaxDayType | undefined;
 }
 
 /**

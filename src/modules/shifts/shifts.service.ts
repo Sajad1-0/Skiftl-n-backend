@@ -4,11 +4,19 @@ import { db } from '../../db/index.js';
 import { jobProfiles, shifts, type JobProfile, type Shift } from '../../db/schema.js';
 import { calculateObPay } from '../../lib/ob/engine.js';
 import { loadObPayContext } from '../../lib/ob/context.js';
-import { calcWorkedMinutes } from '../../lib/shift-pay.js';
+import { calcWorkedMinutes, parseTaxRate } from '../../lib/shift-pay.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { CreateShiftInput, ListShiftsQuery, UpdateShiftInput } from './shifts.schema.js';
+import { attachEstimateNets } from '../../lib/shift-estimate-nets.js';
+import { sameStockholmMonth, stockholmMonthQueryRange } from '../../lib/tax/month-bounds.js';
+import { start } from 'node:repl';
+import { getTaxSettings } from '../tax-settings/tax-settings.service.js';
+import {
+  estimateShiftNetOre,
+  type EstimateShiftNetArgs,
+} from '../../lib/tax/estimate-shift-net.js';
 
-interface PublicShift {
+export interface PublicShift {
   id: string;
   userId: string;
   jobProfileId: string;
@@ -22,6 +30,7 @@ interface PublicShift {
   obOre: number;
   grossOre: number;
   agreementVersionId: string | null;
+  estimatedNetOre: number | null;
 }
 
 interface ShiftPay {
@@ -129,6 +138,7 @@ function toPublicShift(shift: Shift, pay?: ShiftPay, hourlyWageOre?: number): Pu
     obOre: safeOb,
     grossOre,
     agreementVersionId: shift.agreementVersionId ?? pay?.agreementVersionId ?? null,
+    estimatedNetOre: null,
   };
 }
 
@@ -180,7 +190,37 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
   const created = inserted[0];
   if (!created) throw new AppError(500, 'Kunde inte skapa passet');
 
-  return toPublicShift(created, pay);
+  const publicShift = toPublicShift(created, pay);
+
+  const { from, to } = stockholmMonthQueryRange(created.startAt);
+  const prior = await db
+    .select({
+      startAt: shifts.startAt,
+      baseOre: shifts.baseOre,
+      obOre: shifts.obOre,
+    })
+    .from(shifts)
+    .where(and(eq(shifts.userId, userId), gte(shifts.startAt, from), lte(shifts.startAt, to)));
+
+  let grossBefore = 0;
+  for (const p of prior) {
+    if (p.startAt.getTime() >= created.startAt.getTime()) continue;
+    if (!sameStockholmMonth(p.startAt, created.startAt)) continue;
+    grossBefore += (p.baseOre ?? 0) + (p.obOre ?? 0);
+  }
+
+  const settings = await getTaxSettings(userId);
+  let tableCtx: EstimateShiftNetArgs['table'] | undefined;
+  const flat = parseTaxRate(profile.taxRate);
+
+  const estimatedNetOre = estimateShiftNetOre({
+    shiftGrossOre: publicShift.grossOre,
+    grossBeforeOre: grossBefore,
+    ...(tableCtx ? { table: tableCtx } : {}),
+    ...(!tableCtx && flat !== undefined ? { flatTaxRatePercent: flat } : {}),
+  });
+
+  return { ...publicShift, estimatedNetOre };
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
@@ -193,13 +233,20 @@ export async function listShifts(userId: string, query: ListShiftsQuery): Promis
     .select({
       shift: shifts,
       hourlyWage: jobProfiles.hourlyWage,
+      taxRate: jobProfiles.taxRate,
     })
     .from(shifts)
     .innerJoin(jobProfiles, eq(shifts.jobProfileId, jobProfiles.id))
     .where(and(...conditions))
     .orderBy(desc(shifts.startAt));
 
-  return rows.map((row) => toPublicShift(row.shift, undefined, row.hourlyWage));
+  const taxRateByProfileId = new Map<string, number>();
+  const publics = rows.map((row) => {
+    taxRateByProfileId.set(row.shift.jobProfileId, parseTaxRate(row.taxRate));
+    return toPublicShift(row.shift, undefined, row.hourlyWage);
+  });
+
+  return attachEstimateNets(userId, publics, taxRateByProfileId);
 }
 
 export async function getShiftById(userId: string, shiftId: string): Promise<PublicShift> {
