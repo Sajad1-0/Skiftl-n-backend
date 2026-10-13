@@ -33,7 +33,7 @@ export function estimateShiftNetOre(args: EstimateShiftNetArgs): number | null {
   }
 
   if (args.flatTaxRatePercent !== undefined) {
-    return calcNetOre(args.grossBeforeOre, args.flatTaxRatePercent);
+    return calcNetOre(args.shiftGrossOre, args.flatTaxRatePercent);
   }
 
   return null;
