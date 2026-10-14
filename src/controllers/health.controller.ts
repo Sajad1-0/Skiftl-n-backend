@@ -8,7 +8,7 @@ export async function getHealth(_req: Request, res: Response): Promise<void> {
 
     res.status(200).json({
       success: true,
-      message: 'Skiftlön API är igång',
+      message: 'Shiftkit API är igång',
       database: 'connected',
       timestamp: new Date().toISOString(),
     });
