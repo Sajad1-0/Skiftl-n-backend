@@ -13,6 +13,11 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(60 * 60 * 24 * 7),
+  FRONTEND_URL: z.url().default('http://localhost:3000'),
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PRICE_ID: z.string().optional(),
+  PREMIUM_BYPASS_EMAILS: z.string().default('sajjadqaderi00@gmail.com'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -23,3 +28,9 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+export function premiumBypassEmails(): string[] {
+  return env.PREMIUM_BYPASS_EMAILS.split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0);
+}

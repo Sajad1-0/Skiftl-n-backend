@@ -3,6 +3,8 @@ import cors from 'cors';
 
 import { errorHandler } from './middleware/error.middleware.js';
 import authRoutes from './modules/auth/auth.routes.js';
+import billingRoutes from './modules/billing/billing.routes.js';
+import { stripeWebhookController } from './modules/billing/billing.controller.js';
 import agreementsRoutes from './modules/collective-agreements/agreements.router.js';
 import jobProfileRoutes from './modules/job-profiles/job-profile.routes.js';
 import healthRoutes from './routes/health.routes.js';
@@ -15,11 +17,14 @@ export function createApp(): Express {
 
   // Global Middleware
   app.use(cors());
+  // Stripe webhook FÖRE express.json() — behöver rå body för signaturverifiering
+  app.post('/billing/webhook', express.raw({ type: 'application/json' }), stripeWebhookController);
   app.use(express.json());
 
   //Routes
   app.use('/health', healthRoutes);
   app.use('/auth', authRoutes);
+  app.use('/billing', billingRoutes);
   app.use('/collective-agreements', agreementsRoutes);
   app.use('/job-profiles', jobProfileRoutes);
   app.use('/shifts', shiftsRoutes);

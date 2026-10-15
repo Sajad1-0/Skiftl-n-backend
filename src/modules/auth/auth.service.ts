@@ -7,6 +7,7 @@ import { db } from '../../db/index.js';
 import { users, type User } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { LoginInput, RegisterInput } from './auth.schema.js';
+import { effectiveIsPremium } from '../../lib/premium.js';
 
 interface JWTPayload {
   userId: string;
@@ -37,7 +38,7 @@ function toPublicUser(user: User): PublicUser {
     firstName: user.firstName,
     lastName: user.lastName ?? null,
     email: user.email,
-    isPremium: user.isPremium,
+    isPremium: effectiveIsPremium(user),
     monthlySalaryGoal: user.monthlySalaryGoal ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
