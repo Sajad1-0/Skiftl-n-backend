@@ -7,6 +7,7 @@ import { db } from '../../db/index.js';
 import { users, type User } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { LoginInput, RegisterInput } from './auth.schema.js';
+import { effectiveIsPremium } from '../../lib/premium.js';
 
 interface JWTPayload {
   userId: string;
@@ -19,6 +20,8 @@ interface PublicUser {
   lastName: string | null;
   email: string;
   isPremium: boolean;
+  /** True om användaren har Stripe-kund (kan öppna billing portal). */
+  hasStripeCustomer: boolean;
   monthlySalaryGoal: number | null;
   createdAt: Date;
   updatedAt: Date;
@@ -37,7 +40,8 @@ function toPublicUser(user: User): PublicUser {
     firstName: user.firstName,
     lastName: user.lastName ?? null,
     email: user.email,
-    isPremium: user.isPremium,
+    isPremium: effectiveIsPremium(user),
+    hasStripeCustomer: Boolean(user.stripeCustomerId),
     monthlySalaryGoal: user.monthlySalaryGoal ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,

@@ -4,6 +4,7 @@ import type { CreateJobProfileInput, UpdateJobProfileInput } from './job-profile
 import { db } from '../../db/index.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import { collectiveAgreements, jobProfiles, users, type JobProfile } from '../../db/schema.js';
+import { userHasPremium } from '../../lib/premium.js';
 
 interface PublicJobProfile {
   id: string;
@@ -46,12 +47,7 @@ async function assertActiveAgreement(agreementId: string | null | undefined): Pr
 }
 
 async function getUserPremiumStatus(userId: string): Promise<boolean> {
-  const matchedUsers = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  const user = matchedUsers[0];
-
-  if (!user) throw new AppError(404, 'Användaren hittades inte');
-
-  return user.isPremium;
+  return userHasPremium(userId);
 }
 
 async function countProfilesForUser(userId: string): Promise<number> {

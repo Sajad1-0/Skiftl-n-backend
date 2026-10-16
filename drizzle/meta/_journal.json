@@ -29,6 +29,20 @@
       "when": 1791450459452,
       "tag": "0003_silky_stephen_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792050238416,
+      "tag": "0004_open_puff_adder",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792140000000,
+      "tag": "0005_fix_stripe_columns",
+      "breakpoints": true
     }
   ]
 }
