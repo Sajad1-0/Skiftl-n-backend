@@ -25,7 +25,7 @@ export const users = pgTable('users', {
   isPremium: boolean('is_premium').notNull().default(false),
   // Belopp i öre (heltal). Nettolön per månad.
   monthlySalaryGoal: integer('monthly_salary_goal'),
-  stripeCustomerId: varchar('monthly_salary_goal', { length: 255 }),
+  stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
   stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
   stripeSubscriptionStatus: varchar('stripe_subscription_status', { length: 64 }),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),

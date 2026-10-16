@@ -20,6 +20,8 @@ interface PublicUser {
   lastName: string | null;
   email: string;
   isPremium: boolean;
+  /** True om användaren har Stripe-kund (kan öppna billing portal). */
+  hasStripeCustomer: boolean;
   monthlySalaryGoal: number | null;
   createdAt: Date;
   updatedAt: Date;
@@ -39,6 +41,7 @@ function toPublicUser(user: User): PublicUser {
     lastName: user.lastName ?? null,
     email: user.email,
     isPremium: effectiveIsPremium(user),
+    hasStripeCustomer: Boolean(user.stripeCustomerId),
     monthlySalaryGoal: user.monthlySalaryGoal ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,

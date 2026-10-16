@@ -5,14 +5,19 @@ import { env } from '../../config/env.js';
 import { db } from '../../db/index.js';
 import { users } from '../../db/schema.js';
 import { emailHasPremiumBypass, subscriptionStatusGrantsPremium } from '../../lib/premium.js';
-import { getStripe, requireStripePriceId } from '../../lib/stripe.js';
+import { getStripe, requireStripePriceId, subscriptionHasPremiumPrice } from '../../lib/stripe.js';
 import { AppError } from '../../middleware/error.middleware.js';
+
+function customerIdOf(subscription: Stripe.Subscription): string {
+  return typeof subscription.customer === 'string'
+    ? subscription.customer
+    : subscription.customer.id;
+}
 
 async function getUserOrThrow(userId: string) {
   const matched = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   const user = matched[0];
   if (!user) throw new AppError(404, 'Användaren hittades inte');
-
   return user;
 }
 
@@ -21,9 +26,10 @@ async function ensureStripeCustomer(userId: string): Promise<string> {
   if (user.stripeCustomerId) return user.stripeCustomerId;
 
   const stripe = getStripe();
+  const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ');
   const customer = await stripe.customers.create({
     email: user.email,
-    name: [user.firstName, user.lastName].filter(Boolean).join(' '),
+    ...(displayName ? { name: displayName } : {}),
     metadata: { userId: user.id },
   });
 
@@ -65,10 +71,12 @@ export async function createCheckoutSessionUrl(userId: string): Promise<{ url: s
 export async function createBillingPortalUrl(userId: string): Promise<{ url: string }> {
   const user = await getUserOrThrow(userId);
 
-  if (emailHasPremiumBypass(user.email))
+  if (emailHasPremiumBypass(user.email)) {
     throw new AppError(400, 'Bypass-konto behöver ingen Stripe-portal');
-  if (!user.stripeCustomerId)
-    throw new AppError(400, 'Inget Stripe-konto - starta en prenumeration först');
+  }
+  if (!user.stripeCustomerId) {
+    throw new AppError(400, 'Inget Stripe-konto — starta en prenumeration först');
+  }
 
   const stripe = getStripe();
   const portal = await stripe.billingPortal.sessions.create({
@@ -83,6 +91,15 @@ async function setPremiumFromSubscription(
   userId: string,
   subscription: Stripe.Subscription,
 ): Promise<void> {
+  // Endast vår Premium-price får ge entitlement
+  if (!subscriptionHasPremiumPrice(subscription)) {
+    console.error('Stripe subscription saknar Premium-price', {
+      userId,
+      subscriptionId: subscription.id,
+    });
+    return;
+  }
+
   const status = subscription.status;
   const isPremium = subscriptionStatusGrantsPremium(status);
 
@@ -92,10 +109,7 @@ async function setPremiumFromSubscription(
       isPremium,
       stripeSubscriptionId: subscription.id,
       stripeSubscriptionStatus: status,
-      stripeCustomerId:
-        typeof subscription.customer === 'string'
-          ? subscription.customer
-          : subscription.customer.id,
+      stripeCustomerId: customerIdOf(subscription),
     })
     .where(eq(users.id, userId));
 }
@@ -103,19 +117,28 @@ async function setPremiumFromSubscription(
 async function findUserIdForSubscription(
   subscription: Stripe.Subscription,
 ): Promise<string | null> {
-  const fromMeta = subscription.metadata?.userId;
-  if (fromMeta) return fromMeta;
+  const customerId = customerIdOf(subscription);
 
-  const customerId =
-    typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id;
-
-  const matched = await db
-    .select({ id: users.id })
+  const byCustomer = await db
+    .select()
     .from(users)
     .where(eq(users.stripeCustomerId, customerId))
     .limit(1);
 
-  return matched[0]?.id ?? null;
+  const user = byCustomer[0];
+  if (!user) return null;
+
+  const metaUserId = subscription.metadata?.userId;
+  if (metaUserId && metaUserId !== user.id) {
+    console.error('Stripe subscription metadata.userId matchar inte customer', {
+      metaUserId,
+      userId: user.id,
+      customerId,
+    });
+    return null;
+  }
+
+  return user.id;
 }
 
 export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<void> {
@@ -124,14 +147,40 @@ export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<voi
       const session = event.data.object as Stripe.Checkout.Session;
       if (session.mode !== 'subscription') return;
 
-      const userId = session.metadata?.userId ?? session.client_reference_id;
-      if (!userId || !session.subscription) return;
+      const sessionUserId = session.metadata?.userId ?? session.client_reference_id;
+      if (!sessionUserId || !session.subscription) return;
+
+      const sessionCustomerId =
+        typeof session.customer === 'string' ? session.customer : (session.customer?.id ?? null);
+
+      const user = await getUserOrThrow(sessionUserId);
+      if (
+        sessionCustomerId &&
+        user.stripeCustomerId &&
+        user.stripeCustomerId !== sessionCustomerId
+      ) {
+        console.error('Checkout customer matchar inte user.stripeCustomerId', {
+          userId: sessionUserId,
+          sessionCustomerId,
+          stored: user.stripeCustomerId,
+        });
+        return;
+      }
 
       const stripe = getStripe();
       const subId =
         typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
       const subscription = await stripe.subscriptions.retrieve(subId);
-      await setPremiumFromSubscription(userId, subscription);
+
+      // Om customer saknades i DB: spara från session innan status-update
+      if (!user.stripeCustomerId && sessionCustomerId) {
+        await db
+          .update(users)
+          .set({ stripeCustomerId: sessionCustomerId })
+          .where(eq(users.id, sessionUserId));
+      }
+
+      await setPremiumFromSubscription(sessionUserId, subscription);
       return;
     }
 
@@ -152,9 +201,11 @@ export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<voi
           .where(eq(users.id, userId));
         return;
       }
+
       await setPremiumFromSubscription(userId, subscription);
       return;
     }
+
     default:
       return;
   }

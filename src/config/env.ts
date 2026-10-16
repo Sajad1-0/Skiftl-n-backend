@@ -17,7 +17,7 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_ID: z.string().optional(),
-  PREMIUM_BYPASS_EMAILS: z.string().default('sajjadqaderi00@gmail.com'),
+  PREMIUM_BYPASS_EMAILS: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);

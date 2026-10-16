@@ -4,7 +4,6 @@ import { premiumBypassEmails } from '../config/env.js';
 import { db } from '../db/index.js';
 import { users, type User } from '../db/schema.js';
 import { AppError } from '../middleware/error.middleware.js';
-import { boolean } from 'zod';
 
 export function emailHasPremiumBypass(email: string): boolean {
   return premiumBypassEmails().includes(email.trim().toLowerCase());
@@ -22,7 +21,7 @@ export async function userHasPremium(userId: string): Promise<boolean> {
   return effectiveIsPremium(user);
 }
 
-const ACTIVE_STATUSES = new Set(['active', 'trailing']);
+const ACTIVE_STATUSES = new Set(['active', 'trialing']);
 
 export function subscriptionStatusGrantsPremium(status: string | null | undefined): boolean {
   if (!status) return false;
