@@ -14,7 +14,7 @@ import {
   stockholmYearMonth,
 } from '../../lib/tax/month-bounds.js';
 import { estimateShiftNetOre } from '../../lib/tax/estimate-shift-net.js';
-
+import { resolveHistoryRange } from '../../lib/premium/premium-guards.js';
 export interface PublicShift {
   id: string;
   userId: string;
@@ -239,10 +239,13 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
-  const conditions = [eq(shifts.userId, userId), eq(jobProfiles.userId, userId)];
-
-  if (query.from) conditions.push(gte(shifts.endAt, query.from));
-  if (query.to) conditions.push(lte(shifts.startAt, inclusiveEndBound(query.to)));
+  const { from, to } = await resolveHistoryRange(userId, query.from, query.to);
+  const conditions = [
+    eq(shifts.userId, userId),
+    eq(jobProfiles.userId, userId),
+    gte(shifts.endAt, from),
+    lte(shifts.startAt, inclusiveEndBound(to)),
+  ];
 
   const rows = await db
     .select({
@@ -262,10 +265,7 @@ export async function listShifts(userId: string, query: ListShiftsQuery): Promis
   });
 
   // Om from/to klippt listan: ladda hela Stockholm-månaden för korrekt G₀
-  const monthContext =
-    query.from || query.to
-      ? await loadMonthContextShifts(userId, publics, taxRateByProfileId)
-      : publics;
+  const monthContext = await loadMonthContextShifts(userId, publics, taxRateByProfileId);
 
   return attachEstimateNets(userId, publics, taxRateByProfileId, monthContext);
 }

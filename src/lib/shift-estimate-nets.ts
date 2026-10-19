@@ -4,6 +4,7 @@ import { estimateShiftNetOre, type EstimateShiftNetArgs } from './tax/estimate-s
 import { stockholmYearMonth } from './tax/month-bounds.js';
 import { getTaxSettings } from '../modules/tax-settings/tax-settings.service.js';
 import type { TaxColumn } from './tax/types.js';
+import { userHasPremium } from './premium/premium.js';
 
 export interface ShiftEstimateInput {
   id: string;
@@ -22,6 +23,8 @@ function asTaxColumn(n: number): TaxColumn {
 export async function resolveTableCtx(
   userId: string,
 ): Promise<EstimateShiftNetArgs['table'] | undefined> {
+  if (!(await userHasPremium(userId))) return undefined;
+
   const settings = await getTaxSettings(userId);
   if (!settings) return undefined;
 
