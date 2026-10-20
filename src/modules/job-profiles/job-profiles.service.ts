@@ -4,7 +4,7 @@ import type { CreateJobProfileInput, UpdateJobProfileInput } from './job-profile
 import { db } from '../../db/index.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import { collectiveAgreements, jobProfiles, users, type JobProfile } from '../../db/schema.js';
-import { userHasPremium } from '../../lib/premium.js';
+import { userHasPremium } from '../../lib/premium/premium.js';
 
 interface PublicJobProfile {
   id: string;

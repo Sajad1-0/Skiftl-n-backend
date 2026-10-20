@@ -15,6 +15,8 @@ import {
 import { AppError } from '../../middleware/error.middleware.js';
 import { getTaxSettings } from '../tax-settings/tax-settings.service.js';
 import type { MonthlySummaryQuery } from './summaries.schema.js';
+import { userHasPremium } from '../../lib/premium/premium.js';
+import { resolveHistoryRange } from '../../lib/premium/premium-guards.js';
 
 export interface ProfileBreakdown {
   jobProfileId: string;
@@ -102,8 +104,8 @@ export async function getMonthlySummary(
   userId: string,
   query: MonthlySummaryQuery,
 ): Promise<MonthlySummary> {
-  const from = query.from;
-  const to = inclusiveEndBound(query.to);
+  const { from, to: toRaw } = await resolveHistoryRange(userId, query.from, query.to);
+  const to = inclusiveEndBound(toRaw);
 
   if (query.jobProfileId) {
     const owned = await db
@@ -207,7 +209,9 @@ export async function getMonthlySummary(
   let netOre = flatNetOre;
   const profiles = [...byProfile.values()].sort((a, b) => a.name.localeCompare(b.name, 'sv'));
 
-  if (settings) {
+  const premium = await userHasPremium(userId);
+
+  if (premium && settings) {
     const brackets = await loadTaxBrackets(settings.taxYear, settings.tableNumber);
     if (brackets.length === 0) {
       throw new AppError(

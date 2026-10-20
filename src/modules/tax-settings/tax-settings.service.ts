@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { userTaxSettings } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
+import { assertPremiumTaxTable } from '../../lib/premium/premium-guards.js';
 import type { UpsertTaxSettingsInput } from './tax-settings.schema.js';
 
 export interface PublicTaxSettings {
@@ -38,6 +39,8 @@ export async function upsertTaxSettings(
   userId: string,
   input: UpsertTaxSettingsInput,
 ): Promise<PublicTaxSettings> {
+  await assertPremiumTaxTable(userId);
+
   const rows = await db
     .insert(userTaxSettings)
     .values({

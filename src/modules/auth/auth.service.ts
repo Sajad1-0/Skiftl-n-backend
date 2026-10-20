@@ -7,7 +7,7 @@ import { db } from '../../db/index.js';
 import { users, type User } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { LoginInput, RegisterInput } from './auth.schema.js';
-import { effectiveIsPremium } from '../../lib/premium.js';
+import { effectiveIsPremium } from '../../lib/premium/premium.js';
 
 interface JWTPayload {
   userId: string;

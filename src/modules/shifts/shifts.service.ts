@@ -14,7 +14,10 @@ import {
   stockholmYearMonth,
 } from '../../lib/tax/month-bounds.js';
 import { estimateShiftNetOre } from '../../lib/tax/estimate-shift-net.js';
-
+import {
+  assertFreeCanAccessShiftStart,
+  resolveHistoryRange,
+} from '../../lib/premium/premium-guards.js';
 export interface PublicShift {
   id: string;
   userId: string;
@@ -168,6 +171,7 @@ async function getOwnedShift(userId: string, shiftId: string): Promise<Shift> {
 }
 
 export async function createShift(userId: string, input: CreateShiftInput): Promise<PublicShift> {
+  await assertFreeCanAccessShiftStart(userId, input.startAt);
   const profile = await getOwnedJobProfile(userId, input.jobProfileId);
   const pay = await computeShiftPay(profile, input.startAt, input.endAt, input.breakMinutes);
 
@@ -239,10 +243,13 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
-  const conditions = [eq(shifts.userId, userId), eq(jobProfiles.userId, userId)];
-
-  if (query.from) conditions.push(gte(shifts.endAt, query.from));
-  if (query.to) conditions.push(lte(shifts.startAt, inclusiveEndBound(query.to)));
+  const { from, to } = await resolveHistoryRange(userId, query.from, query.to);
+  const conditions = [
+    eq(shifts.userId, userId),
+    eq(jobProfiles.userId, userId),
+    gte(shifts.endAt, from),
+    lte(shifts.startAt, inclusiveEndBound(to)),
+  ];
 
   const rows = await db
     .select({
@@ -262,10 +269,7 @@ export async function listShifts(userId: string, query: ListShiftsQuery): Promis
   });
 
   // Om from/to klippt listan: ladda hela Stockholm-månaden för korrekt G₀
-  const monthContext =
-    query.from || query.to
-      ? await loadMonthContextShifts(userId, publics, taxRateByProfileId)
-      : publics;
+  const monthContext = await loadMonthContextShifts(userId, publics, taxRateByProfileId);
 
   return attachEstimateNets(userId, publics, taxRateByProfileId, monthContext);
 }
@@ -318,6 +322,7 @@ async function loadMonthContextShifts(
 
 export async function getShiftById(userId: string, shiftId: string): Promise<PublicShift> {
   const shift = await getOwnedShift(userId, shiftId);
+  await assertFreeCanAccessShiftStart(userId, shift.startAt);
   const profile = await getOwnedJobProfile(userId, shift.jobProfileId);
 
   return toPublicShift(shift, undefined, profile.hourlyWage);
@@ -329,6 +334,7 @@ export async function updateShift(
   input: UpdateShiftInput,
 ): Promise<PublicShift> {
   const existing = await getOwnedShift(userId, shiftId);
+  await assertFreeCanAccessShiftStart(userId, existing.startAt);
 
   if (Object.keys(input).length === 0) {
     throw new AppError(400, 'Ingen uppdateringsdata skickades');
@@ -340,6 +346,9 @@ export async function updateShift(
   const nextStart = input.startAt ?? existing.startAt;
   const nextEnd = input.endAt ?? existing.endAt;
   const nextBreak = input.breakMinutes ?? existing.breakMinutes;
+
+  // Free får inte flytta pass ut ur innevarande månad
+  await assertFreeCanAccessShiftStart(userId, nextStart);
 
   if (nextEnd.getTime() <= nextStart.getTime()) {
     throw new AppError(400, 'endAt måste vara efter startAt');
@@ -373,7 +382,8 @@ export async function updateShift(
 }
 
 export async function deleteShift(userId: string, shiftId: string): Promise<void> {
-  await getOwnedShift(userId, shiftId);
+  const existing = await getOwnedShift(userId, shiftId);
+  await assertFreeCanAccessShiftStart(userId, existing.startAt);
 
   await db.delete(shifts).where(and(eq(shifts.id, shiftId), eq(shifts.userId, userId)));
 }

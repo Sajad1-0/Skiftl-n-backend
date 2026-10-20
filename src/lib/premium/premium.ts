@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm';
 
-import { premiumBypassEmails } from '../config/env.js';
-import { db } from '../db/index.js';
-import { users, type User } from '../db/schema.js';
-import { AppError } from '../middleware/error.middleware.js';
+import { premiumBypassEmails } from '../../config/env.js';
+import { db } from '../../db/index.js';
+import { users, type User } from '../../db/schema.js';
+import { AppError } from '../../middleware/error.middleware.js';
 
 export function emailHasPremiumBypass(email: string): boolean {
   return premiumBypassEmails().includes(email.trim().toLowerCase());
