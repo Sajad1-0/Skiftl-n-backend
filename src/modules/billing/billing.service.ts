@@ -4,7 +4,10 @@ import type Stripe from 'stripe';
 import { env } from '../../config/env.js';
 import { db } from '../../db/index.js';
 import { users } from '../../db/schema.js';
-import { emailHasPremiumBypass, subscriptionStatusGrantsPremium } from '../../lib/premium.js';
+import {
+  emailHasPremiumBypass,
+  subscriptionStatusGrantsPremium,
+} from '../../lib/premium/premium.js';
 import { getStripe, requireStripePriceId, subscriptionHasPremiumPrice } from '../../lib/stripe.js';
 import { AppError } from '../../middleware/error.middleware.js';
 

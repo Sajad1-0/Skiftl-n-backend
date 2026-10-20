@@ -105,7 +105,7 @@ export async function getMonthlySummary(
   query: MonthlySummaryQuery,
 ): Promise<MonthlySummary> {
   const { from, to: toRaw } = await resolveHistoryRange(userId, query.from, query.to);
-  const to = inclusiveEndBound(query.to);
+  const to = inclusiveEndBound(toRaw);
 
   if (query.jobProfileId) {
     const owned = await db
