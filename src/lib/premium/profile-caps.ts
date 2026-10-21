@@ -1,0 +1,2 @@
+export const FREE_ACTIVE_PROFILE_CAP = 1;
+export const PREMIUM_ACTIVE_PROFILE_CAP = 5;

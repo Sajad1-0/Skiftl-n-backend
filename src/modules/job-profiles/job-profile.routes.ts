@@ -7,6 +7,8 @@ import {
   getJobProfileByIdController,
   listJobProfilesController,
   deleteJobProfileController,
+  archivedJobProfileController,
+  unarchiveJobProfileController,
 } from './job-profiles.controller.js';
 
 const router: Router = Router();
@@ -16,6 +18,8 @@ router.use(requireAuth);
 router.post('/', createJobProfileController);
 router.get('/', listJobProfilesController);
 router.get('/:id', getJobProfileByIdController);
+router.post('/:id/archive', archivedJobProfileController);
+router.post('/:id/unarchive', unarchiveJobProfileController);
 router.patch('/:id', updateJobProfileController);
 router.delete('/:id', deleteJobProfileController);
 
