@@ -140,6 +140,8 @@ export const jobProfiles = pgTable(
     taxRate: numeric('tax_rate', { precision: 5, scale: 2 }).notNull(),
     employerName: varchar('employer_name', { length: 200 }),
     isPrimary: boolean('is_primary').notNull().default(false),
+    /** null = aktiv; satt = arkiverad (räknas inte mot free/premium-cap) */
+    archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'date' }),
     // null = Ingen OB (bara grundlön)
     collectiveAgreementId: uuid('collective_agreement_id').references(
       () => collectiveAgreements.id,

@@ -18,6 +18,10 @@ import {
   assertFreeCanAccessShiftStart,
   resolveHistoryRange,
 } from '../../lib/premium/premium-guards.js';
+import {
+  getActiveOwnedJobProfile,
+  getOwnedJobProfile,
+} from '../job-profiles/job-profiles.service.js';
 export interface PublicShift {
   id: string;
   userId: string;
@@ -144,21 +148,6 @@ function toPublicShift(shift: Shift, pay?: ShiftPay, hourlyWageOre?: number): Pu
   };
 }
 
-async function getOwnedJobProfile(userId: string, jobProfileId: string) {
-  const matched = await db
-    .select()
-    .from(jobProfiles)
-    .where(eq(jobProfiles.id, jobProfileId))
-    .limit(1);
-  const profile = matched[0];
-
-  if (!profile || profile.userId !== userId) {
-    throw new AppError(404, 'Jobbprofilen hittades inte');
-  }
-
-  return profile;
-}
-
 async function getOwnedShift(userId: string, shiftId: string): Promise<Shift> {
   const matched = await db.select().from(shifts).where(eq(shifts.id, shiftId)).limit(1);
   const shift = matched[0];
@@ -172,7 +161,7 @@ async function getOwnedShift(userId: string, shiftId: string): Promise<Shift> {
 
 export async function createShift(userId: string, input: CreateShiftInput): Promise<PublicShift> {
   await assertFreeCanAccessShiftStart(userId, input.startAt);
-  const profile = await getOwnedJobProfile(userId, input.jobProfileId);
+  const profile = await getActiveOwnedJobProfile(userId, input.jobProfileId);
   const pay = await computeShiftPay(profile, input.startAt, input.endAt, input.breakMinutes);
 
   const inserted = await db
@@ -323,6 +312,7 @@ async function loadMonthContextShifts(
 export async function getShiftById(userId: string, shiftId: string): Promise<PublicShift> {
   const shift = await getOwnedShift(userId, shiftId);
   await assertFreeCanAccessShiftStart(userId, shift.startAt);
+  // Tillåt arkiverad profil — historiska pass ska fortfarande gå att läsa
   const profile = await getOwnedJobProfile(userId, shift.jobProfileId);
 
   return toPublicShift(shift, undefined, profile.hourlyWage);
@@ -341,7 +331,11 @@ export async function updateShift(
   }
 
   const nextJobProfileId = input.jobProfileId ?? existing.jobProfileId;
-  const profile = await getOwnedJobProfile(userId, nextJobProfileId);
+  // Byte till annan profil kräver aktiv; samma id (även arkiverad) tillåts för löne-omräkning
+  const isSwitchingProfile = nextJobProfileId !== existing.jobProfileId;
+  const profile = isSwitchingProfile
+    ? await getActiveOwnedJobProfile(userId, nextJobProfileId)
+    : await getOwnedJobProfile(userId, nextJobProfileId);
 
   const nextStart = input.startAt ?? existing.startAt;
   const nextEnd = input.endAt ?? existing.endAt;

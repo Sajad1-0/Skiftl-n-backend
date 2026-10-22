@@ -12,7 +12,10 @@ import {
   getJobProfileById,
   listJobProfiles,
   deleteJobProfile,
+  archiveJobProfile,
+  unarchiveJobProfile,
 } from './job-profiles.service.js';
+import { success } from 'zod';
 
 function requiredUser(req: Request): string {
   if (!req.user) throw new AppError(401, 'Inte autentiserad');
@@ -53,7 +56,8 @@ export async function listJobProfilesController(
 ): Promise<void> {
   try {
     const userId = requiredUser(req);
-    const profiles = await listJobProfiles(userId);
+    const includeArchived = req.query.includeArchived === 'true';
+    const profiles = await listJobProfiles(userId, { includeArchived });
 
     res.status(200).json({
       success: true,
@@ -123,6 +127,53 @@ export async function updateJobProfileController(
       success: true,
       message: 'Jobbprofilen uppdaterades',
       data: updateProfile,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function archivedJobProfileController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userId = requiredUser(req);
+    const parsedParams = jobProfileIdSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      next(new AppError(400, 'Ogiltig profil-id'));
+      return;
+    }
+    const profile = await archiveJobProfile(userId, parsedParams.data.id);
+    res.status(200).json({
+      success: true,
+      message: 'Jobbprofilen arkiverades',
+      data: profile,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function unarchiveJobProfileController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userId = requiredUser(req);
+    const parsedParams = jobProfileIdSchema.safeParse(req.params);
+    if (!parsedParams.success) {
+      next(new AppError(400, 'Ogiltig profil-id'));
+      return;
+    }
+
+    const profile = await unarchiveJobProfile(userId, parsedParams.data.id);
+    res.status(200).json({
+      success: true,
+      message: 'jobbprofilen återställdes',
+      data: profile,
     });
   } catch (error) {
     next(error);
