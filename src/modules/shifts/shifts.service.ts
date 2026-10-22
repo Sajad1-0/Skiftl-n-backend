@@ -331,11 +331,11 @@ export async function updateShift(
   }
 
   const nextJobProfileId = input.jobProfileId ?? existing.jobProfileId;
-  // Byte till annan profil kräver aktiv; behåll samma (även arkiverad) för löne-omräkning
-  const profile =
-    input.jobProfileId !== undefined
-      ? await getActiveOwnedJobProfile(userId, nextJobProfileId)
-      : await getOwnedJobProfile(userId, nextJobProfileId);
+  // Byte till annan profil kräver aktiv; samma id (även arkiverad) tillåts för löne-omräkning
+  const isSwitchingProfile = nextJobProfileId !== existing.jobProfileId;
+  const profile = isSwitchingProfile
+    ? await getActiveOwnedJobProfile(userId, nextJobProfileId)
+    : await getOwnedJobProfile(userId, nextJobProfileId);
 
   const nextStart = input.startAt ?? existing.startAt;
   const nextEnd = input.endAt ?? existing.endAt;
