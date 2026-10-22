@@ -207,6 +207,7 @@ export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<voi
             stripeSubscriptionId: subscription.id,
           })
           .where(eq(users.id, userId));
+        await forceArchiveExtrasOnDowngrade(userId);
         return;
       }
 

@@ -18,7 +18,10 @@ import {
   assertFreeCanAccessShiftStart,
   resolveHistoryRange,
 } from '../../lib/premium/premium-guards.js';
-import { getActiveOwnedJobProfile } from '../job-profiles/job-profiles.service.js';
+import {
+  getActiveOwnedJobProfile,
+  getOwnedJobProfile,
+} from '../job-profiles/job-profiles.service.js';
 export interface PublicShift {
   id: string;
   userId: string;
@@ -309,7 +312,8 @@ async function loadMonthContextShifts(
 export async function getShiftById(userId: string, shiftId: string): Promise<PublicShift> {
   const shift = await getOwnedShift(userId, shiftId);
   await assertFreeCanAccessShiftStart(userId, shift.startAt);
-  const profile = await getActiveOwnedJobProfile(userId, shift.jobProfileId);
+  // Tillåt arkiverad profil — historiska pass ska fortfarande gå att läsa
+  const profile = await getOwnedJobProfile(userId, shift.jobProfileId);
 
   return toPublicShift(shift, undefined, profile.hourlyWage);
 }
@@ -327,7 +331,11 @@ export async function updateShift(
   }
 
   const nextJobProfileId = input.jobProfileId ?? existing.jobProfileId;
-  const profile = await getActiveOwnedJobProfile(userId, nextJobProfileId);
+  // Byte till annan profil kräver aktiv; behåll samma (även arkiverad) för löne-omräkning
+  const profile =
+    input.jobProfileId !== undefined
+      ? await getActiveOwnedJobProfile(userId, nextJobProfileId)
+      : await getOwnedJobProfile(userId, nextJobProfileId);
 
   const nextStart = input.startAt ?? existing.startAt;
   const nextEnd = input.endAt ?? existing.endAt;

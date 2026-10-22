@@ -3,7 +3,7 @@ import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import type { CreateJobProfileInput, UpdateJobProfileInput } from './job-profiles.schema.js';
 import { db } from '../../db/index.js';
 import { AppError } from '../../middleware/error.middleware.js';
-import { collectiveAgreements, jobProfiles, users, type JobProfile } from '../../db/schema.js';
+import { collectiveAgreements, jobProfiles, type JobProfile } from '../../db/schema.js';
 import { userHasPremium } from '../../lib/premium/premium.js';
 import {
   FREE_ACTIVE_PROFILE_CAP,
@@ -60,11 +60,6 @@ async function getUserPremiumStatus(userId: string): Promise<boolean> {
   return userHasPremium(userId);
 }
 
-async function countProfilesForUser(userId: string): Promise<number> {
-  const profiles = await db.select().from(jobProfiles).where(eq(jobProfiles.userId, userId));
-  return profiles.length;
-}
-
 async function countActiveProfiles(userId: string): Promise<number> {
   const rows = await db
     .select({ id: jobProfiles.id })
@@ -86,7 +81,7 @@ async function clearPrimaryForUser(userId: string, exceptProfileId?: string): Pr
   await db.update(jobProfiles).set({ isPrimary: false }).where(eq(jobProfiles.userId, userId));
 }
 
-async function getOwnedProfile(userId: string, profileId: string): Promise<JobProfile> {
+export async function getOwnedJobProfile(userId: string, profileId: string): Promise<JobProfile> {
   const matched = await db.select().from(jobProfiles).where(eq(jobProfiles.id, profileId)).limit(1);
   const profile = matched[0];
   if (!profile || profile.userId !== userId) {
@@ -101,7 +96,7 @@ export async function createJobProfile(
   input: CreateJobProfileInput,
 ): Promise<PublicJobProfile> {
   const isPremium = await getUserPremiumStatus(userId);
-  const activeCount = await countProfilesForUser(userId);
+  const activeCount = await countActiveProfiles(userId);
   const cap = isPremium ? PREMIUM_ACTIVE_PROFILE_CAP : FREE_ACTIVE_PROFILE_CAP;
 
   if (activeCount >= cap) {
@@ -109,7 +104,7 @@ export async function createJobProfile(
       403,
       isPremium
         ? `Premium tillåter max ${PREMIUM_ACTIVE_PROFILE_CAP} aktiva jobbprofiler. Arkivera en först.`
-        : 'Gratisplan tillåter bara en jobbProfil. Uppgradera till Premium för flera.',
+        : 'Gratisplan tillåter bara en jobbprofil. Uppgradera till Premium för flera.',
     );
   }
 
@@ -166,15 +161,15 @@ export async function getJobProfileById(
   userId: string,
   profileId: string,
 ): Promise<PublicJobProfile> {
-  return toPublicJobProfile(await getOwnedProfile(userId, profileId));
+  return toPublicJobProfile(await getOwnedJobProfile(userId, profileId));
 }
 
-// För shift-create: Måste ägas och vara aktiv.
+/** För nya pass / byte till profil: måste ägas och vara aktiv. */
 export async function getActiveOwnedJobProfile(
   userId: string,
   profileId: string,
 ): Promise<JobProfile> {
-  const profile = await getOwnedProfile(userId, profileId);
+  const profile = await getOwnedJobProfile(userId, profileId);
   if (isArchived(profile)) {
     throw new AppError(400, 'Jobbprofilen är arkiverad. Återställ den eller välj en aktiv profil.');
   }
@@ -187,7 +182,7 @@ export async function updateJobProfile(
   profileId: string,
   input: UpdateJobProfileInput,
 ): Promise<PublicJobProfile> {
-  const existing = await getOwnedProfile(userId, profileId);
+  const existing = await getOwnedJobProfile(userId, profileId);
   if (isArchived(existing)) {
     throw new AppError(400, 'Arkiverad profil kan inte redigeras. Återställ den först');
   }
@@ -224,8 +219,13 @@ export async function archiveJobProfile(
   userId: string,
   profileId: string,
 ): Promise<PublicJobProfile> {
-  const profile = await getOwnedProfile(userId, profileId);
+  const profile = await getOwnedJobProfile(userId, profileId);
   if (isArchived(profile)) {
+    throw new AppError(400, 'Profilen är redan arkiverad');
+  }
+
+  const activeCount = await countActiveProfiles(userId);
+  if (activeCount <= 1) {
     throw new AppError(400, 'Du måste ha minst en aktiv jobbprofil');
   }
 
@@ -258,6 +258,11 @@ export async function unarchiveJobProfile(
   profileId: string,
 ): Promise<PublicJobProfile> {
   if (!(await userHasPremium(userId))) {
+    throw new AppError(403, 'Återställning av arkiverad profil kräver Premium');
+  }
+
+  const profile = await getOwnedJobProfile(userId, profileId);
+  if (!isArchived(profile)) {
     throw new AppError(400, 'Profilen är redan aktiv');
   }
 
@@ -311,7 +316,7 @@ export async function forceArchiveExtrasOnDowngrade(userId: string): Promise<voi
 }
 
 export async function deleteJobProfile(userId: string, profileId: string): Promise<void> {
-  const profile = await getOwnedProfile(userId, profileId);
+  const profile = await getOwnedJobProfile(userId, profileId);
 
   await db
     .delete(jobProfiles)
