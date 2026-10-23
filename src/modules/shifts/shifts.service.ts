@@ -9,6 +9,7 @@ import { AppError } from '../../middleware/error.middleware.js';
 import type { CreateShiftInput, ListShiftsQuery, UpdateShiftInput } from './shifts.schema.js';
 import { attachEstimateNets, resolveTableCtx } from '../../lib/shift-estimate-nets.js';
 import {
+  isWithinRecentStockholmMonths,
   sameStockholmMonth,
   stockholmMonthQueryRange,
   stockholmYearMonth,
@@ -232,11 +233,12 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
-  const { from, to } = await resolveHistoryRange(userId, query.from, query.to);
+  const { from, to, isPremium } = await resolveHistoryRange(userId, query.from, query.to);
+  const now = new Date();
   const conditions = [
     eq(shifts.userId, userId),
     eq(jobProfiles.userId, userId),
-    gte(shifts.endAt, from),
+    gte(shifts.startAt, from),
     lte(shifts.startAt, inclusiveEndBound(to)),
   ];
 
@@ -252,10 +254,15 @@ export async function listShifts(userId: string, query: ListShiftsQuery): Promis
     .orderBy(desc(shifts.startAt));
 
   const taxRateByProfileId = new Map<string, number>();
-  const publics = rows.map((row) => {
-    taxRateByProfileId.set(row.shift.jobProfileId, parseTaxRate(row.taxRate));
-    return toPublicShift(row.shift, undefined, row.hourlyWage);
-  });
+  const publics = rows
+    .map((row) => {
+      taxRateByProfileId.set(row.shift.jobProfileId, parseTaxRate(row.taxRate));
+      return toPublicShift(row.shift, undefined, row.hourlyWage);
+    })
+    .filter((s) => {
+      const start = new Date(s.startAt);
+      return isPremium ? isWithinRecentStockholmMonths(start, now) : sameStockholmMonth(start, now);
+    });
 
   // Om from/to klippt listan: ladda hela Stockholm-månaden för korrekt G₀
   const monthContext = await loadMonthContextShifts(userId, publics, taxRateByProfileId);
