@@ -1,3 +1,51 @@
+export const PREMIUM_HISTORY_MONTHS = 6;
+
+export interface YearMonth {
+  year: number;
+  month: number; // 1-12
+}
+
+function monthIndex(ym: YearMonth): number {
+  return ym.year * 12 + ym.month;
+}
+
+// Nuvarande + föregående (count-1) Stockholm-månader, nyast först.
+export function listSelectableStockholmMonths(
+  now: Date = new Date(),
+  count: number = PREMIUM_HISTORY_MONTHS,
+): YearMonth[] {
+  const { year, month } = stockholmYearMonth(now);
+  const out: YearMonth[] = [];
+
+  let y = year;
+  let m = month;
+  for (let i = 0; i < count; i++) {
+    out.push({ year: y, month: m });
+    m -= 1;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+  }
+  return out;
+}
+
+/** true om date ligger i en av de senaste `count` Stockholm-månaderna (inkl. nu). */
+export function isWithinRecentStockholmMonths(
+  date: Date,
+  now: Date = new Date(),
+  count: number = PREMIUM_HISTORY_MONTHS,
+): boolean {
+  const d = stockholmYearMonth(date);
+  const n = stockholmYearMonth(now);
+  const diff = monthIndex(n) - monthIndex(d);
+  return diff >= 0 && diff < count;
+}
+
+export function yearMonthKey(ym: YearMonth): string {
+  return `${ym.year}-${String(ym.month).padStart(2, '0')}`;
+}
+
 export function stockholmYearMonth(date: Date): { year: number; month: number } {
   const fmt = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Stockholm',

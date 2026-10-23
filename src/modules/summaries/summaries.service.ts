@@ -17,6 +17,7 @@ import { getTaxSettings } from '../tax-settings/tax-settings.service.js';
 import type { MonthlySummaryQuery } from './summaries.schema.js';
 import { userHasPremium } from '../../lib/premium/premium.js';
 import { resolveHistoryRange } from '../../lib/premium/premium-guards.js';
+import { isWithinRecentStockholmMonths, sameStockholmMonth } from '../../lib/tax/month-bounds.js';
 
 export interface ProfileBreakdown {
   jobProfileId: string;
@@ -104,8 +105,13 @@ export async function getMonthlySummary(
   userId: string,
   query: MonthlySummaryQuery,
 ): Promise<MonthlySummary> {
-  const { from, to: toRaw } = await resolveHistoryRange(userId, query.from, query.to);
+  const {
+    from,
+    to: toRaw,
+    isPremium: rangeIsPremium,
+  } = await resolveHistoryRange(userId, query.from, query.to);
   const to = inclusiveEndBound(toRaw);
+  const now = new Date();
 
   if (query.jobProfileId) {
     const owned = await db
@@ -122,7 +128,7 @@ export async function getMonthlySummary(
   const conditions = [
     eq(shifts.userId, userId),
     eq(jobProfiles.userId, userId),
-    gte(shifts.endAt, from),
+    gte(shifts.startAt, from),
     lte(shifts.startAt, to),
   ];
 
@@ -160,6 +166,11 @@ export async function getMonthlySummary(
   let flatNetOre = 0;
 
   for (const row of rows) {
+    const startOk = rangeIsPremium
+      ? isWithinRecentStockholmMonths(row.shift.startAt, now)
+      : sameStockholmMonth(row.shift.startAt, now);
+    if (!startOk) continue;
+
     const tax = parseTaxRate(row.taxRate);
     const pay = shiftPaySnapshot(
       row.shift.startAt,

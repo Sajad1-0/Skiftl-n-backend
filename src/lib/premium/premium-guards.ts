@@ -1,40 +1,58 @@
 import { userHasPremium } from './premium.js';
 import {
+  isWithinRecentStockholmMonths,
+  PREMIUM_HISTORY_MONTHS,
   sameStockholmMonth,
   stockholmMonthQueryRange,
   stockholmYearMonth,
 } from '../tax/month-bounds.js';
 import { AppError } from '../../middleware/error.middleware.js';
 
+export interface HistoryRange {
+  from: Date;
+  to: Date;
+  isPremium: boolean;
+}
+
 /**
- * Free: endast innevarande Stockholm-månad (DB-query använder padded range).
- * Premium: returnerar angivet from/to.
+ * Free: innevarande Stockholm-månad.
+ * Premium: from/to måste ligga inom 6 Stockholm-månaderna.
  */
 export async function resolveHistoryRange(
   userId: string,
   from: Date | undefined,
   to: Date | undefined,
-): Promise<{ from: Date; to: Date }> {
-  const premium = await userHasPremium(userId);
+): Promise<HistoryRange> {
+  const isPremium = await userHasPremium(userId);
   const now = new Date();
   const current = stockholmMonthQueryRange(now);
 
-  if (premium) {
-    if (!from || !to) {
-      throw new AppError(400, 'from och to krävs');
+  if (!isPremium) {
+    if (from && !sameStockholmMonth(from, now)) {
+      throwForbiddenCurrentMonth(now);
     }
-    return { from, to };
+    if (to && !sameStockholmMonth(to, now)) {
+      throwForbiddenCurrentMonth(now);
+    }
+    return { ...current, isPremium: false };
   }
 
-  // Klientens from/to får inte peka utanför innevarande Stockholm-månad
-  if (from && !sameStockholmMonth(from, now)) {
-    throwForbiddenCurrentMonth(now);
-  }
-  if (to && !sameStockholmMonth(to, now)) {
-    throwForbiddenCurrentMonth(now);
+  if (!from || !to) {
+    throw new AppError(400, 'from och to krävs');
   }
 
-  return current;
+  if (from.getTime() > to.getTime()) {
+    throw new AppError(400, 'from måste vara före eller lika med to');
+  }
+
+  if (!isWithinRecentStockholmMonths(from, now) || !isWithinRecentStockholmMonths(to, now)) {
+    throw new AppError(
+      403,
+      `Premium tillåter historik för de senaste ${PREMIUM_HISTORY_MONTHS} månaderna.`,
+    );
+  }
+
+  return { from, to, isPremium: true };
 }
 
 function throwForbiddenCurrentMonth(now: Date): never {
@@ -54,13 +72,22 @@ export async function assertPremiumTaxTable(userId: string): Promise<void> {
   }
 }
 
-/** Free: blockera läs/skriv av pass utanför innevarande Stockholm-månad. */
+/** Free: innevarande månad. Premium: senaste 6 månaderna. */
 export async function assertFreeCanAccessShiftStart(
   userId: string,
   shiftStartAt: Date,
 ): Promise<void> {
-  if (await userHasPremium(userId)) return;
-  if (!sameStockholmMonth(shiftStartAt, new Date())) {
-    throwForbiddenCurrentMonth(new Date());
+  const now = new Date();
+  if (await userHasPremium(userId)) {
+    if (!isWithinRecentStockholmMonths(shiftStartAt, now)) {
+      throw new AppError(
+        403,
+        `Premium tillåter pass inom de senaste ${PREMIUM_HISTORY_MONTHS} månaderna.`,
+      );
+    }
+    return;
+  }
+  if (!sameStockholmMonth(shiftStartAt, now)) {
+    throwForbiddenCurrentMonth(now);
   }
 }
