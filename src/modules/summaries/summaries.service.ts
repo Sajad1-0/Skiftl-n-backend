@@ -158,6 +158,7 @@ export async function getMonthlySummary(
 
   const byProfile = new Map<string, ProfileBreakdown>();
 
+  let shiftCount = 0;
   let workedMinutes = 0;
   let breakMinutes = 0;
   let baseOre = 0;
@@ -182,6 +183,7 @@ export async function getMonthlySummary(
     );
     const flatNet = calcNetOre(pay.grossOre, tax);
 
+    shiftCount += 1;
     workedMinutes += pay.workedMinutes;
     breakMinutes += row.shift.breakMinutes;
     baseOre += pay.baseOre;
@@ -251,7 +253,7 @@ export async function getMonthlySummary(
   return {
     from,
     to,
-    shiftCount: rows.length,
+    shiftCount,
     workedMinutes,
     breakMinutes,
     baseOre,
