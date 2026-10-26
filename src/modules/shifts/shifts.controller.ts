@@ -2,18 +2,21 @@ import type { NextFunction, Request, Response } from 'express';
 
 import { AppError } from '../../middleware/error.middleware.js';
 import {
+  bulkCreateShiftsSchema,
   createShiftSchema,
   listShiftsQuerySchema,
   shiftIdSchema,
   updateShiftSchema,
 } from './shifts.schema.js';
 import {
+  createBulkShifts,
   createShift,
   deleteShift,
   getShiftById,
   listShifts,
   updateShift,
 } from './shifts.service.js';
+import { success } from 'zod';
 
 function requiredUser(req: Request): string {
   if (!req.user) throw new AppError(401, 'Inte autentiserad');
@@ -41,6 +44,32 @@ export async function createShiftController(
       success: true,
       message: 'Passet skapades',
       data: shift,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createBulkShiftsController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userId = requiredUser(req);
+    const parsed = bulkCreateShiftsSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      next(new AppError(400, 'Ogiltig bul-passdata'));
+      return;
+    }
+
+    const shifts = await createBulkShifts(userId, parsed.data);
+
+    res.status(201).json({
+      success: true,
+      message: `${shifts.length} pass skapades`,
+      data: shifts,
     });
   } catch (error) {
     next(error);

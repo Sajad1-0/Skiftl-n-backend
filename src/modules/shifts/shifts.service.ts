@@ -6,7 +6,12 @@ import { calculateObPay } from '../../lib/ob/engine.js';
 import { loadObPayContext } from '../../lib/ob/context.js';
 import { calcWorkedMinutes, parseTaxRate } from '../../lib/shift-pay.js';
 import { AppError } from '../../middleware/error.middleware.js';
-import type { CreateShiftInput, ListShiftsQuery, UpdateShiftInput } from './shifts.schema.js';
+import type {
+  BulkCreateShiftsInput,
+  CreateShiftInput,
+  ListShiftsQuery,
+  UpdateShiftInput,
+} from './shifts.schema.js';
 import { attachEstimateNets, resolveTableCtx } from '../../lib/shift-estimate-nets.js';
 import {
   isWithinRecentStockholmMonths,
@@ -23,6 +28,7 @@ import {
   getActiveOwnedJobProfile,
   getOwnedJobProfile,
 } from '../job-profiles/job-profiles.service.js';
+import { userHasPremium } from '../../lib/premium/premium.js';
 export interface PublicShift {
   id: string;
   userId: string;
@@ -230,6 +236,29 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
   });
 
   return { ...publicShift, estimatedNetOre };
+}
+
+export async function createBulkShifts(
+  userId: string,
+  input: BulkCreateShiftsInput,
+): Promise<PublicShift[]> {
+  if (!(await userHasPremium(userId))) {
+    throw new AppError(403, 'Bulk-log kräver Premium');
+  }
+
+  // Samma profil för alla rader; createShift gate:ar månad + aktiv profil
+  const created: PublicShift[] = [];
+  for (const row of input.shifts) {
+    const payload: CreateShiftInput = {
+      jobProfileId: input.jobProfileId,
+      startAt: row.startAt,
+      endAt: row.endAt,
+      breakMinutes: row.breakMinutes,
+      ...(row.notes !== undefined ? { notes: row.notes } : {}),
+    };
+    created.push(await createShift(userId, payload));
+  }
+  return created;
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {
