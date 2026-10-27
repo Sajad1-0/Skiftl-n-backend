@@ -16,7 +16,6 @@ import {
   listShifts,
   updateShift,
 } from './shifts.service.js';
-import { success } from 'zod';
 
 function requiredUser(req: Request): string {
   if (!req.user) throw new AppError(401, 'Inte autentiserad');
