@@ -29,6 +29,7 @@ export interface ProfileBreakdown {
   baseOre: number;
   obOre: number;
   grossOre: number;
+  taxOre: number;
   netOre: number;
 }
 
@@ -200,6 +201,7 @@ export async function getMonthlySummary(
       existing.obOre += pay.obOre;
       existing.grossOre += pay.grossOre;
       existing.netOre += flatNet;
+      existing.taxOre += pay.grossOre - flatNet;
     } else {
       byProfile.set(row.profileId, {
         jobProfileId: row.profileId,
@@ -211,6 +213,7 @@ export async function getMonthlySummary(
         baseOre: pay.baseOre,
         obOre: pay.obOre,
         grossOre: pay.grossOre,
+        taxOre: pay.grossOre - flatNet,
         netOre: flatNet,
       });
     }
@@ -245,6 +248,9 @@ export async function getMonthlySummary(
     taxOre = lookup.taxOre;
     netOre = grossOre - taxOre;
     allocateNetByGross(profiles, grossOre, netOre);
+    for (const profile of profiles) {
+      profile.taxOre = profile.grossOre - profile.netOre;
+    }
   }
 
   const goalProgressPercent =
