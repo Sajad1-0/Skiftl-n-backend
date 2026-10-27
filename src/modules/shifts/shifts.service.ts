@@ -6,7 +6,12 @@ import { calculateObPay } from '../../lib/ob/engine.js';
 import { loadObPayContext } from '../../lib/ob/context.js';
 import { calcWorkedMinutes, parseTaxRate } from '../../lib/shift-pay.js';
 import { AppError } from '../../middleware/error.middleware.js';
-import type { CreateShiftInput, ListShiftsQuery, UpdateShiftInput } from './shifts.schema.js';
+import type {
+  BulkCreateShiftsInput,
+  CreateShiftInput,
+  ListShiftsQuery,
+  UpdateShiftInput,
+} from './shifts.schema.js';
 import { attachEstimateNets, resolveTableCtx } from '../../lib/shift-estimate-nets.js';
 import {
   isWithinRecentStockholmMonths,
@@ -23,6 +28,7 @@ import {
   getActiveOwnedJobProfile,
   getOwnedJobProfile,
 } from '../job-profiles/job-profiles.service.js';
+import { userHasPremium } from '../../lib/premium/premium.js';
 export interface PublicShift {
   id: string;
   userId: string;
@@ -184,7 +190,17 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
   if (!created) throw new AppError(500, 'Kunde inte skapa passet');
 
   const publicShift = toPublicShift(created, pay);
+  const estimatedNetOre = await estimateNetForCreatedShift(userId, created, profile, publicShift);
+  return { ...publicShift, estimatedNetOre };
+}
 
+/** Est. netto för nyss skapat pass (marginal inom Stockholm-månad). */
+async function estimateNetForCreatedShift(
+  userId: string,
+  created: Shift,
+  profile: JobProfile,
+  publicShift: PublicShift,
+): Promise<number | null> {
   const { from, to } = stockholmMonthQueryRange(created.startAt);
   // Join profil så legacy-rader utan snapshot får samma brutto-fallback som listShifts
   const prior = await db
@@ -222,14 +238,81 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
   const tableCtx = await resolveTableCtx(userId);
   const flat = parseTaxRate(profile.taxRate);
 
-  const estimatedNetOre = estimateShiftNetOre({
+  return estimateShiftNetOre({
     shiftGrossOre: publicShift.grossOre,
     grossBeforeOre: grossBefore,
     ...(tableCtx ? { table: tableCtx } : {}),
     ...(!tableCtx ? { flatTaxRatePercent: flat } : {}),
   });
+}
 
-  return { ...publicShift, estimatedNetOre };
+export async function createBulkShifts(
+  userId: string,
+  input: BulkCreateShiftsInput,
+): Promise<PublicShift[]> {
+  if (!(await userHasPremium(userId))) {
+    throw new AppError(403, 'Bulk-log kräver Premium');
+  }
+
+  const profile = await getActiveOwnedJobProfile(userId, input.jobProfileId);
+
+  // Preflight: fånga månadsfönster + rast vs längd innan någon write
+  for (const row of input.shifts) {
+    await assertFreeCanAccessShiftStart(userId, row.startAt);
+    calcWorkedMinutes(row.startAt, row.endAt, row.breakMinutes);
+  }
+
+  const prepared: Array<{
+    startAt: Date;
+    endAt: Date;
+    breakMinutes: number;
+    notes: string | null;
+    pay: ShiftPay;
+  }> = [];
+
+  for (const row of input.shifts) {
+    const pay = await computeShiftPay(profile, row.startAt, row.endAt, row.breakMinutes);
+    prepared.push({
+      startAt: row.startAt,
+      endAt: row.endAt,
+      breakMinutes: row.breakMinutes,
+      notes: row.notes ?? null,
+      pay,
+    });
+  }
+
+  const inserted = await db.transaction(async (tx) => {
+    const rows: Array<{ shift: Shift; pay: ShiftPay }> = [];
+    for (const item of prepared) {
+      const result = await tx
+        .insert(shifts)
+        .values({
+          userId,
+          jobProfileId: input.jobProfileId,
+          startAt: item.startAt,
+          endAt: item.endAt,
+          breakMinutes: item.breakMinutes,
+          notes: item.notes,
+          agreementVersionId: item.pay.agreementVersionId,
+          baseOre: item.pay.baseOre,
+          obOre: item.pay.obOre,
+        })
+        .returning();
+      const created = result[0];
+      if (!created) throw new AppError(500, 'Kunde inte skapa passen');
+      rows.push({ shift: created, pay: item.pay });
+    }
+    return rows;
+  });
+
+  // Est. netto efter commit (läsning); misslyckande här lämnar pass kvar men inte halv batch
+  const out: PublicShift[] = [];
+  for (const { shift, pay } of inserted) {
+    const publicShift = toPublicShift(shift, pay);
+    const estimatedNetOre = await estimateNetForCreatedShift(userId, shift, profile, publicShift);
+    out.push({ ...publicShift, estimatedNetOre });
+  }
+  return out;
 }
 
 export async function listShifts(userId: string, query: ListShiftsQuery): Promise<PublicShift[]> {

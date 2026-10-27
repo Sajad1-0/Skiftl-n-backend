@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { requireAuth } from '../../middleware/auth.middleware.js';
 import {
+  createBulkShiftsController,
   createShiftController,
   listShiftsController,
   getShiftByIdController,
@@ -13,6 +14,7 @@ const router: Router = Router();
 router.use(requireAuth);
 
 router.post('/', createShiftController);
+router.post('/bulk', createBulkShiftsController);
 router.get('/', listShiftsController);
 router.get('/:id', getShiftByIdController);
 router.patch('/:id', updateShiftController);
