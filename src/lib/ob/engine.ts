@@ -3,6 +3,7 @@ import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
 
 import type { DayKind, ObPayResult, ObRuleInput, ObSegment } from './types.js';
+import type { BreakInterval } from '../breaks.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -73,7 +74,31 @@ export function paidIntervall(
   startAt: Date,
   endAt: Date,
   breakMinutes: number,
+  breakIntervals?: BreakInterval[] | null,
 ): Array<{ start: Date; end: Date }> {
+  if (breakIntervals && breakIntervals.length > 0) {
+    const sorted = [...breakIntervals].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
+
+    const paid: Array<{ start: Date; end: Date }> = [];
+    let cursor = startAt.getTime();
+    const endMs = endAt.getTime();
+
+    for (const br of sorted) {
+      const bStart = br.startAt.getTime();
+      const bEnd = br.endAt.getTime();
+
+      if (bStart > cursor) {
+        paid.push({ start: new Date(cursor), end: new Date(bStart) });
+      }
+      cursor = Math.max(cursor, bEnd);
+    }
+
+    if (cursor < endMs) {
+      paid.push({ start: new Date(cursor), end: endAt });
+    }
+    return paid;
+  }
+
   const startMs = startAt.getTime();
   const endMs = endAt.getTime();
   const breakMs = breakMinutes * 60_000;
@@ -97,12 +122,18 @@ export function calculateObPay(input: {
   startAt: Date;
   endAt: Date;
   breakMinutes: number;
+  breakIntervals?: BreakInterval[] | null;
   hourlyWagesOre: number;
   rules: ObRuleInput[];
   holidays: Set<string>;
   dayBeforeHoliday: Set<string>;
 }): ObPayResult {
-  const intervals = paidIntervall(input.startAt, input.endAt, input.breakMinutes);
+  const intervals = paidIntervall(
+    input.startAt,
+    input.endAt,
+    input.breakMinutes,
+    input.breakIntervals,
+  );
   const wagePerMinute = input.hourlyWagesOre / 60;
 
   let workedMinutes = 0;

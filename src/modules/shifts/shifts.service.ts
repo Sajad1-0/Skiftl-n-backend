@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, lte } from 'drizzle-orm';
 
 import { db } from '../../db/index.js';
 import { jobProfiles, shifts, type JobProfile, type Shift } from '../../db/schema.js';
@@ -23,11 +23,18 @@ import { estimateShiftNetOre } from '../../lib/tax/estimate-shift-net.js';
 import {
   assertFreeCanAccessShiftStart,
   resolveHistoryRange,
+  resolveShiftBreaks,
 } from '../../lib/premium/premium-guards.js';
 import {
   getActiveOwnedJobProfile,
   getOwnedJobProfile,
 } from '../job-profiles/job-profiles.service.js';
+import {
+  parsedStoredBreakIntervals,
+  toStoredBreakIntervals,
+  type BreakInterval,
+  type StoredBreakIntervals,
+} from '../../lib/breaks.js';
 import { userHasPremium } from '../../lib/premium/premium.js';
 export interface PublicShift {
   id: string;
@@ -36,6 +43,7 @@ export interface PublicShift {
   startAt: Date;
   endAt: Date;
   breakMinutes: number;
+  breakIntervals: StoredBreakIntervals[] | null;
   notes: string | null;
   createdAt: Date;
   workedMinutes: number;
@@ -75,6 +83,7 @@ async function computeShiftPay(
   startAt: Date,
   endAt: Date,
   breakMinutes: number,
+  breakIntervals?: BreakInterval[] | null,
 ): Promise<ShiftPay> {
   const workedMinutes = calcWorkedMinutes(startAt, endAt, breakMinutes);
 
@@ -105,6 +114,7 @@ async function computeShiftPay(
     startAt,
     endAt,
     breakMinutes,
+    breakIntervals: breakIntervals ?? null,
     hourlyWagesOre: profile.hourlyWage,
     rules: ctx.rules,
     holidays: ctx.holiday,
@@ -121,6 +131,12 @@ async function computeShiftPay(
 }
 
 function toPublicShift(shift: Shift, pay?: ShiftPay, hourlyWageOre?: number): PublicShift {
+  const parsedIntervals = parsedStoredBreakIntervals(
+    shift.breakIntervals as StoredBreakIntervals[] | null,
+  );
+  const breakIntervals =
+    parsedIntervals.length > 0 ? toStoredBreakIntervals(parsedIntervals) : null;
+
   const workedMinutes =
     pay?.workedMinutes ?? calcWorkedMinutes(shift.startAt, shift.endAt, shift.breakMinutes);
 
@@ -144,6 +160,7 @@ function toPublicShift(shift: Shift, pay?: ShiftPay, hourlyWageOre?: number): Pu
     startAt: shift.startAt,
     endAt: shift.endAt,
     breakMinutes: shift.breakMinutes,
+    breakIntervals,
     notes: shift.notes ?? null,
     createdAt: shift.createdAt,
     workedMinutes,
@@ -169,7 +186,20 @@ async function getOwnedShift(userId: string, shiftId: string): Promise<Shift> {
 export async function createShift(userId: string, input: CreateShiftInput): Promise<PublicShift> {
   await assertFreeCanAccessShiftStart(userId, input.startAt);
   const profile = await getActiveOwnedJobProfile(userId, input.jobProfileId);
-  const pay = await computeShiftPay(profile, input.startAt, input.endAt, input.breakMinutes);
+  const resolved = await resolveShiftBreaks(
+    userId,
+    input.startAt,
+    input.endAt,
+    input.breakMinutes,
+    input.breakIntervals,
+  );
+  const pay = await computeShiftPay(
+    profile,
+    input.startAt,
+    input.endAt,
+    resolved.breakMinutes,
+    resolved.breakIntervals,
+  );
 
   const inserted = await db
     .insert(shifts)
@@ -178,7 +208,10 @@ export async function createShift(userId: string, input: CreateShiftInput): Prom
       jobProfileId: input.jobProfileId,
       startAt: input.startAt,
       endAt: input.endAt,
-      breakMinutes: input.breakMinutes,
+      breakMinutes: resolved.breakMinutes,
+      breakIntervals: resolved.breakIntervals
+        ? toStoredBreakIntervals(resolved.breakIntervals)
+        : null,
       notes: input.notes ?? null,
       agreementVersionId: pay.agreementVersionId,
       baseOre: pay.baseOre,
@@ -256,26 +289,38 @@ export async function createBulkShifts(
 
   const profile = await getActiveOwnedJobProfile(userId, input.jobProfileId);
 
-  // Preflight: fånga månadsfönster + rast vs längd innan någon write
-  for (const row of input.shifts) {
-    await assertFreeCanAccessShiftStart(userId, row.startAt);
-    calcWorkedMinutes(row.startAt, row.endAt, row.breakMinutes);
-  }
-
+  // Preflight + pay per rad (samma break-regler som createShift)
   const prepared: Array<{
     startAt: Date;
     endAt: Date;
     breakMinutes: number;
+    breakIntervals: BreakInterval[] | null;
     notes: string | null;
     pay: ShiftPay;
   }> = [];
 
   for (const row of input.shifts) {
-    const pay = await computeShiftPay(profile, row.startAt, row.endAt, row.breakMinutes);
+    await assertFreeCanAccessShiftStart(userId, row.startAt);
+    const resolved = await resolveShiftBreaks(
+      userId,
+      row.startAt,
+      row.endAt,
+      row.breakMinutes,
+      row.breakIntervals,
+    );
+    calcWorkedMinutes(row.startAt, row.endAt, resolved.breakMinutes);
+    const pay = await computeShiftPay(
+      profile,
+      row.startAt,
+      row.endAt,
+      resolved.breakMinutes,
+      resolved.breakIntervals,
+    );
     prepared.push({
       startAt: row.startAt,
       endAt: row.endAt,
-      breakMinutes: row.breakMinutes,
+      breakMinutes: resolved.breakMinutes,
+      breakIntervals: resolved.breakIntervals,
       notes: row.notes ?? null,
       pay,
     });
@@ -292,6 +337,7 @@ export async function createBulkShifts(
           startAt: item.startAt,
           endAt: item.endAt,
           breakMinutes: item.breakMinutes,
+          breakIntervals: item.breakIntervals ? toStoredBreakIntervals(item.breakIntervals) : null,
           notes: item.notes,
           agreementVersionId: item.pay.agreementVersionId,
           baseOre: item.pay.baseOre,
@@ -427,9 +473,26 @@ export async function updateShift(
     ? await getActiveOwnedJobProfile(userId, nextJobProfileId)
     : await getOwnedJobProfile(userId, nextJobProfileId);
 
+  // UpdateShiftInput har optional fält — coalesca till Date innan resolveShiftBreaks
   const nextStart = input.startAt ?? existing.startAt;
   const nextEnd = input.endAt ?? existing.endAt;
-  const nextBreak = input.breakMinutes ?? existing.breakMinutes;
+  const isPremium = await userHasPremium(userId);
+  const existingIntervals = parsedStoredBreakIntervals(existing.breakIntervals);
+
+  // Free: skicka aldrig lagrade intervall till resolveShiftBreaks (403).
+  // Då rensas intervall-läge och pay räknas om med breakMinutes (end-lump OB).
+  let nextIntervals: BreakInterval[] | undefined;
+  if (!isPremium) {
+    nextIntervals = undefined;
+  } else if (input.breakIntervals !== undefined) {
+    nextIntervals = input.breakIntervals;
+  } else if (input.breakMinutes !== undefined) {
+    nextIntervals = undefined; // explicit minuter → lämna intervall-läget
+  } else if (existingIntervals.length > 0) {
+    nextIntervals = existingIntervals;
+  } else {
+    nextIntervals = undefined;
+  }
 
   // Free får inte flytta pass ut ur innevarande månad
   await assertFreeCanAccessShiftStart(userId, nextStart);
@@ -442,7 +505,21 @@ export async function updateShift(
     throw new AppError(400, 'Passet får vara högst 24 timmar');
   }
 
-  const pay = await computeShiftPay(profile, nextStart, nextEnd, nextBreak);
+  const resolved = await resolveShiftBreaks(
+    userId,
+    nextStart,
+    nextEnd,
+    input.breakMinutes ?? existing.breakMinutes,
+    nextIntervals,
+  );
+
+  const pay = await computeShiftPay(
+    profile,
+    nextStart,
+    nextEnd,
+    resolved.breakMinutes,
+    resolved.breakIntervals,
+  );
 
   const updated = await db
     .update(shifts)
@@ -450,7 +527,10 @@ export async function updateShift(
       ...(input.jobProfileId !== undefined ? { jobProfileId: input.jobProfileId } : {}),
       ...(input.startAt !== undefined ? { startAt: input.startAt } : {}),
       ...(input.endAt !== undefined ? { endAt: input.endAt } : {}),
-      ...(input.breakMinutes !== undefined ? { breakMinutes: input.breakMinutes } : {}),
+      breakMinutes: resolved.breakMinutes,
+      breakIntervals: resolved.breakIntervals
+        ? toStoredBreakIntervals(resolved.breakIntervals)
+        : null,
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
       agreementVersionId: pay.agreementVersionId,
       baseOre: pay.baseOre,
@@ -470,4 +550,36 @@ export async function deleteShift(userId: string, shiftId: string): Promise<void
   await assertFreeCanAccessShiftStart(userId, existing.startAt);
 
   await db.delete(shifts).where(and(eq(shifts.id, shiftId), eq(shifts.userId, userId)));
+}
+
+/**
+ * Vid Premium-downgrade: ta bort exakta intervall och räkna om pay med breakMinutes
+ * (end-lump OB), så free inte behåller intervall-optimerad OB-snapshot.
+ */
+export async function stripExactBreaksOnDowngrade(userId: string): Promise<void> {
+  const rows = await db
+    .select()
+    .from(shifts)
+    .where(and(eq(shifts.userId, userId), isNotNull(shifts.breakIntervals)));
+
+  for (const shift of rows) {
+    const ownedProfile = await getOwnedJobProfile(userId, shift.jobProfileId);
+    const pay = await computeShiftPay(
+      ownedProfile,
+      shift.startAt,
+      shift.endAt,
+      shift.breakMinutes,
+      null,
+    );
+
+    await db
+      .update(shifts)
+      .set({
+        breakIntervals: null,
+        agreementVersionId: pay.agreementVersionId,
+        baseOre: pay.baseOre,
+        obOre: pay.obOre,
+      })
+      .where(and(eq(shifts.id, shift.id), eq(shifts.userId, userId)));
+  }
 }

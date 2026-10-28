@@ -4,6 +4,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   smallint,
@@ -169,6 +170,8 @@ export const shifts = pgTable(
     startAt: timestamp('start_at', { withTimezone: true, mode: 'date' }).notNull(),
     endAt: timestamp('end_at', { withTimezone: true, mode: 'date' }).notNull(),
     breakMinutes: integer('break_minutes').notNull().default(0),
+    /** Premium: exakta rastintervall. Free/legacy: null. break_minutes är alltid den härledda summan. */
+    breakIntervals: jsonb('break_intervals').$type<Array<{ startAt: string; endAt: string }> | null>(),
     notes: text('notes'),
     // SnapShot: vilken avtalsversion som användas vid beräkning
     agreementVersionId: uuid('agreement_version_id').references(

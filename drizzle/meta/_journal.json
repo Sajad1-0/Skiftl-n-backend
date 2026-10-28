@@ -50,6 +50,20 @@
       "when": 1792500000000,
       "tag": "0006_job_profile_archive",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793000000000,
+      "tag": "0007_shift_break_intervals",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793188582981,
+      "tag": "0008_fix_legacy_break_intervals",
+      "breakpoints": true
     }
   ]
 }
