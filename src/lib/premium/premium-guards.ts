@@ -99,9 +99,9 @@ export async function assertFreeCanAccessShiftStart(
 }
 
 /**
- * Free: endast breakMinutes; breakIntervals → 403.
- * Premium: om breakIntervals skickas → validera + härled breakMinutes.
- *          annars behåll breakMinutes (bakåtkompat).
+ * Free: endast breakMinutes; icke-tom breakIntervals → 403.
+ * Premium: icke-tom breakIntervals → validera + härled breakMinutes.
+ *          tom [] / undefined → behåll breakMinutes (minuter-läge, bakåtkompat).
  */
 
 export async function resolveShiftBreaks(
@@ -112,22 +112,23 @@ export async function resolveShiftBreaks(
   breakIntervals: BreakInterval[] | undefined,
 ): Promise<ResolveBreaks> {
   const premium = await userHasPremium(userId);
+  const hasExactIntervals = breakIntervals !== undefined && breakIntervals.length > 0;
 
   if (!premium) {
-    if (breakIntervals !== undefined && breakIntervals.length > 0) {
+    if (hasExactIntervals) {
       throw new AppError(403, 'Exakta rastintervall kräver Premium. Ange rast i minuter.');
     }
     return { breakMinutes: breakMinutes ?? 0, breakIntervals: null };
   }
 
-  if (breakIntervals !== undefined) {
+  if (hasExactIntervals) {
     validateBreakIntervals(shiftStart, shiftEnd, breakIntervals);
-    const minutes = totalBreakMinutes(breakIntervals);
     return {
-      breakMinutes: minutes,
-      breakIntervals: breakIntervals.length > 0 ? breakIntervals : [],
+      breakMinutes: totalBreakMinutes(breakIntervals),
+      breakIntervals,
     };
   }
 
+  // undefined eller []: inte intervall-läge — nolla inte explicit breakMinutes
   return { breakMinutes: breakMinutes ?? 0, breakIntervals: null };
 }
