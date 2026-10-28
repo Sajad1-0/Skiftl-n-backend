@@ -9,12 +9,23 @@ function withinMaxDuration(startAt: Date, endAt: Date): boolean {
   return endAt.getTime() - startAt.getTime() <= MAX_SHIFT_MS;
 }
 
+const breakIntervalSchema = z
+  .object({
+    startAt: z.coerce.date(),
+    endAt: z.coerce.date(),
+  })
+  .refine((d) => d.endAt.getTime() > d.startAt.getTime(), {
+    message: 'Rast: Sluttid måste vara efter starttid',
+    path: ['endAt'],
+  });
+
 export const createShiftSchema = z
   .object({
     jobProfileId: z.uuid(),
     startAt: z.coerce.date(),
     endAt: z.coerce.date(),
     breakMinutes: z.number().int().min(0).default(0),
+    breakIntervals: z.array(breakIntervalSchema).max(20).optional(),
     notes: z.string().trim().max(2000).optional(),
   })
   .refine((data) => data.endAt.getTime() > data.startAt.getTime(), {
@@ -32,6 +43,7 @@ export const updateShiftSchema = z
     startAt: z.coerce.date().optional(),
     endAt: z.coerce.date().optional(),
     breakMinutes: z.number().int().min(0).optional(),
+    breakIntervals: z.array(breakIntervalSchema).max(20).optional(),
     notes: z.string().trim().max(2000).nullable().optional(),
   })
   .refine(
@@ -67,6 +79,7 @@ const bulkShiftRowSchema = z
     startAt: z.coerce.date(),
     endAt: z.coerce.date(),
     breakMinutes: z.number().int().min(0).default(0),
+    breakIntervals: z.array(breakIntervalSchema).max(20).optional(),
     notes: z.string().trim().max(2000).optional(),
   })
   .refine((data) => data.endAt.getTime() > data.startAt.getTime(), {

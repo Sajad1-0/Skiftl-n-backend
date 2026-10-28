@@ -11,6 +11,7 @@ import {
 import { getStripe, requireStripePriceId, subscriptionHasPremiumPrice } from '../../lib/stripe.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import { forceArchiveExtrasOnDowngrade } from '../job-profiles/job-profiles.service.js';
+import { stripExactBreaksOnDowngrade } from '../shifts/shifts.service.js';
 
 function customerIdOf(subscription: Stripe.Subscription): string {
   return typeof subscription.customer === 'string'
@@ -119,6 +120,7 @@ async function setPremiumFromSubscription(
 
   if (!isPremium) {
     await forceArchiveExtrasOnDowngrade(userId);
+    await stripExactBreaksOnDowngrade(userId);
   }
 }
 
@@ -208,6 +210,7 @@ export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<voi
           })
           .where(eq(users.id, userId));
         await forceArchiveExtrasOnDowngrade(userId);
+        await stripExactBreaksOnDowngrade(userId);
         return;
       }
 

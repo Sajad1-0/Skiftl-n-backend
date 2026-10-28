@@ -6,12 +6,18 @@ import {
   stockholmMonthQueryRange,
   stockholmYearMonth,
 } from '../tax/month-bounds.js';
+import { type BreakInterval, validateBreakIntervals, totalBreakMinutes } from '../breaks.js';
 import { AppError } from '../../middleware/error.middleware.js';
 
 export interface HistoryRange {
   from: Date;
   to: Date;
   isPremium: boolean;
+}
+
+export interface ResolveBreaks {
+  breakMinutes: number;
+  breakIntervals: BreakInterval[] | null;
 }
 
 /**
@@ -90,4 +96,39 @@ export async function assertFreeCanAccessShiftStart(
   if (!sameStockholmMonth(shiftStartAt, now)) {
     throwForbiddenCurrentMonth(now);
   }
+}
+
+/**
+ * Free: endast breakMinutes; icke-tom breakIntervals → 403.
+ * Premium: icke-tom breakIntervals → validera + härled breakMinutes.
+ *          tom [] / undefined → behåll breakMinutes (minuter-läge, bakåtkompat).
+ */
+
+export async function resolveShiftBreaks(
+  userId: string,
+  shiftStart: Date,
+  shiftEnd: Date,
+  breakMinutes: number | undefined,
+  breakIntervals: BreakInterval[] | undefined,
+): Promise<ResolveBreaks> {
+  const premium = await userHasPremium(userId);
+  const hasExactIntervals = breakIntervals !== undefined && breakIntervals.length > 0;
+
+  if (!premium) {
+    if (hasExactIntervals) {
+      throw new AppError(403, 'Exakta rastintervall kräver Premium. Ange rast i minuter.');
+    }
+    return { breakMinutes: breakMinutes ?? 0, breakIntervals: null };
+  }
+
+  if (hasExactIntervals) {
+    validateBreakIntervals(shiftStart, shiftEnd, breakIntervals);
+    return {
+      breakMinutes: totalBreakMinutes(breakIntervals),
+      breakIntervals,
+    };
+  }
+
+  // undefined eller []: inte intervall-läge — nolla inte explicit breakMinutes
+  return { breakMinutes: breakMinutes ?? 0, breakIntervals: null };
 }
