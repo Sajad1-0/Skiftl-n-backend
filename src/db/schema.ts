@@ -171,7 +171,10 @@ export const shifts = pgTable(
     endAt: timestamp('end_at', { withTimezone: true, mode: 'date' }).notNull(),
     breakMinutes: integer('break_minutes').notNull().default(0),
     /** Premium: exakta rastintervall. Free/legacy: null. break_minutes är alltid den härledda summan. */
-    breakIntervals: jsonb('break_intervals').$type<Array<{ startAt: string; endAt: string }> | null>(),
+    breakIntervals: jsonb('break_intervals').$type<Array<{
+      startAt: string;
+      endAt: string;
+    }> | null>(),
     notes: text('notes'),
     // SnapShot: vilken avtalsversion som användas vid beräkning
     agreementVersionId: uuid('agreement_version_id').references(
@@ -243,6 +246,27 @@ export const userTaxSettings = pgTable('user_tax_settings', {
     .$onUpdate(() => new Date()),
 });
 
+export const sickLeavePeriods = pgTable(
+  'sick_leave_periods',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    jobProfileId: uuid('job_profile_id')
+      .notNull()
+      .references(() => jobProfiles.id, { onDelete: 'cascade' }),
+    startDate: date('start_date', { mode: 'string' }).notNull(),
+    endDate: date('end_date', { mode: 'string' }).notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('sick_leave_user_id_idx').on(table.userId),
+    index('sick_leave_user_start_idx').on(table.userId, table.startDate),
+  ],
+);
+
 // Relations (För Drizzle queries med .with())
 export const usersRelations = relations(users, ({ many, one }) => ({
   jobProfiles: many(jobProfiles),
@@ -251,6 +275,7 @@ export const usersRelations = relations(users, ({ many, one }) => ({
     fields: [users.id],
     references: [userTaxSettings.userId],
   }),
+  sickLeavePeriods: many(sickLeavePeriods),
 }));
 
 export const collectiveAgreementsRelations = relations(collectiveAgreements, ({ many }) => ({
@@ -287,6 +312,7 @@ export const jobProfilesRelations = relations(jobProfiles, ({ one, many }) => ({
     references: [collectiveAgreements.id],
   }),
   shifts: many(shifts),
+  sickLeavePeriods: many(sickLeavePeriods),
 }));
 
 export const shiftsRelations = relations(shifts, ({ one }) => ({
@@ -311,6 +337,16 @@ export const userTaxSettingsRelations = relations(userTaxSettings, ({ one }) => 
   }),
 }));
 
+export const sickLeavePeriodsRelations = relations(sickLeavePeriods, ({ one }) => ({
+  user: one(users, {
+    fields: [sickLeavePeriods.userId],
+    references: [users.id],
+  }),
+  jobProfile: one(jobProfiles, {
+    fields: [sickLeavePeriods.jobProfileId],
+    references: [jobProfiles.id],
+  }),
+}));
 // Infererade TypeScript-typer
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -327,3 +363,5 @@ export type ObRule = typeof obRules.$inferSelect;
 export type TaxTableBracket = typeof taxTableBrackets.$inferSelect;
 
 export type UserTaxSettings = typeof userTaxSettings.$inferSelect;
+
+export type SickLeavePeriod = typeof sickLeavePeriods.$inferSelect;
