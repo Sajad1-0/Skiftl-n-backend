@@ -15,8 +15,6 @@ import {
   getSickLeaveById,
   deleteSickLeave,
 } from './sick-leave.service.js';
-import { success } from 'zod';
-import { shiftIdSchema } from '../shifts/shifts.schema.js';
 
 function requiredUser(req: Request): string {
   if (!req.user) throw new AppError(401, 'Inte autentiserad');

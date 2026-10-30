@@ -64,6 +64,13 @@
       "when": 1793188582981,
       "tag": "0008_fix_legacy_break_intervals",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794000000000,
+      "tag": "0009_sick_leave_periods",
+      "breakpoints": true
     }
   ]
 }

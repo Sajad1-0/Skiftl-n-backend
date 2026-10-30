@@ -18,6 +18,14 @@ import type { MonthlySummaryQuery } from './summaries.schema.js';
 import { userHasPremium } from '../../lib/premium/premium.js';
 import { resolveHistoryRange } from '../../lib/premium/premium-guards.js';
 import { isWithinRecentStockholmMonths, sameStockholmMonth } from '../../lib/tax/month-bounds.js';
+import { loadSickPeriodsOverlapping } from '../sick-leave/sick-leave.service.js';
+import {
+  calculateSickPayForPeriod,
+  isShiftOnSickWorkday,
+  stockholmDateKey,
+  type SickDayBreakdown,
+} from '../../lib/sick/sick-pay.js';
+import e from 'express';
 
 export interface ProfileBreakdown {
   jobProfileId: string;
@@ -31,6 +39,17 @@ export interface ProfileBreakdown {
   grossOre: number;
   taxOre: number;
   netOre: number;
+}
+
+export interface SickLeaveSummaryRow {
+  periodId: string;
+  jobProfileId: string;
+  profileName: string;
+  startDate: string;
+  endDate: string;
+  karensdag: string | null;
+  sickPayOre: number;
+  days: SickDayBreakdown[];
 }
 
 export interface MonthlySummary {
@@ -50,6 +69,8 @@ export interface MonthlySummary {
   goalOre: number | null;
   goalProgressPercent: number;
   byJobProfile: ProfileBreakdown[];
+  sickPayOre: number;
+  sickLeave: SickLeaveSummaryRow[];
 }
 
 function shiftPaySnapshot(
@@ -157,6 +178,57 @@ export async function getMonthlySummary(
 
   const goalOre = userRows[0]?.monthlySalaryGoal ?? null;
 
+  const premium = await userHasPremium(userId);
+
+  const sickRows =
+    premium && rangeIsPremium ? await loadSickPeriodsOverlapping(userId, from, to) : [];
+
+  const sickPeriodMeta = sickRows.map((r) => ({
+    jobProfileId: r.period.jobProfileId,
+    startDate: r.period.startDate,
+    endDate: r.period.endDate,
+  }));
+
+  const fromKey = stockholmDateKey(from);
+  const toKey = stockholmDateKey(to);
+
+  const sickLeave: SickLeaveSummaryRow[] = [];
+  let sickPayOre = 0;
+
+  for (const r of sickRows) {
+    const allShifts = await db
+      .select()
+      .from(shifts)
+      .where(and(eq(shifts.userId, userId), eq(shifts.jobProfileId, r.period.jobProfileId)));
+
+    const calc = calculateSickPayForPeriod({
+      periodId: r.period.id,
+      jobProfileId: r.period.jobProfileId,
+      startDate: r.period.startDate,
+      endDate: r.period.endDate,
+      hourlyWageOre: r.hourlyWage,
+      shifts: allShifts.map((s) => ({
+        startAt: s.startAt,
+        workedMinutes: calcWorkedMinutes(s.startAt, s.endAt, s.breakMinutes),
+      })),
+    });
+
+    const daysInMonth = calc.days.filter((d) => d.date >= fromKey && d.date <= toKey);
+    const monthSickPay = daysInMonth.reduce((sum, d) => sum + d.sickPayOre, 0);
+    sickPayOre += monthSickPay;
+
+    sickLeave.push({
+      periodId: r.period.id,
+      jobProfileId: r.period.jobProfileId,
+      profileName: r.profileName,
+      startDate: r.period.startDate,
+      endDate: r.period.endDate,
+      karensdag: calc.karensdag,
+      sickPayOre: monthSickPay,
+      days: daysInMonth,
+    });
+  }
+
   const byProfile = new Map<string, ProfileBreakdown>();
 
   let shiftCount = 0;
@@ -173,6 +245,8 @@ export async function getMonthlySummary(
       : sameStockholmMonth(row.shift.startAt, now);
     if (!startOk) continue;
 
+    const onSick = isShiftOnSickWorkday(row.shift.startAt, row.profileId, sickPeriodMeta);
+
     const tax = parseTaxRate(row.taxRate);
     const pay = shiftPaySnapshot(
       row.shift.startAt,
@@ -182,11 +256,14 @@ export async function getMonthlySummary(
       row.shift.baseOre ?? null,
       row.shift.obOre ?? null,
     );
-    const flatNet = calcNetOre(pay.grossOre, tax);
 
     shiftCount += 1;
     workedMinutes += pay.workedMinutes;
     breakMinutes += row.shift.breakMinutes;
+
+    if (onSick) continue;
+
+    const flatNet = calcNetOre(pay.grossOre, tax);
     baseOre += pay.baseOre;
     obOre += pay.obOre;
     grossOre += pay.grossOre;
@@ -219,13 +296,20 @@ export async function getMonthlySummary(
     }
   }
 
+  grossOre += sickPayOre;
+  if (sickPayOre > 0 && !(premium && (await getTaxSettings(userId)))) {
+    // flatNet för sjuklön: använd snitt av profiler eller 30
+    const avgRate =
+      [...byProfile.values()].reduce((s, p) => s + p.taxRate, 0) / Math.max(1, byProfile.size) ||
+      30;
+    flatNetOre += calcNetOre(sickPayOre, avgRate);
+  }
+
   const settings = await getTaxSettings(userId);
   let taxMode: 'table' | 'flat' = 'flat';
   let taxOre = grossOre - flatNetOre;
   let netOre = flatNetOre;
   const profiles = [...byProfile.values()].sort((a, b) => a.name.localeCompare(b.name, 'sv'));
-
-  const premium = await userHasPremium(userId);
 
   if (premium && settings) {
     const brackets = await loadTaxBrackets(settings.taxYear, settings.tableNumber);
@@ -247,10 +331,17 @@ export async function getMonthlySummary(
     taxMode = 'table';
     taxOre = lookup.taxOre;
     netOre = grossOre - taxOre;
-    allocateNetByGross(profiles, grossOre, netOre);
+    allocateNetByGross(profiles, profiles.reduce((s, p) => s + p.grossOre, 0) || 1, netOre);
     for (const profile of profiles) {
       profile.taxOre = profile.grossOre - profile.netOre;
     }
+  } else if (sickPayOre > 0) {
+    const avgRate =
+      profiles.reduce((s, p) => s + p.taxRate, 0) / Math.max(1, profiles.length) || 30;
+    const sickNet = calcNetOre(sickPayOre, avgRate);
+    // flatNetOre inkluderar redan shift-netto; lägg till sick om du inte redan gjort det ovan
+    taxOre = grossOre - flatNetOre;
+    netOre = flatNetOre;
   }
 
   const goalProgressPercent =
@@ -271,5 +362,7 @@ export async function getMonthlySummary(
     goalOre,
     goalProgressPercent,
     byJobProfile: profiles,
+    sickPayOre,
+    sickLeave: premium ? sickLeave : [],
   };
 }

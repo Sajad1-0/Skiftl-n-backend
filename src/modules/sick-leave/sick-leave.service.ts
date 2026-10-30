@@ -1,4 +1,4 @@
-import { and, eq, desc, gte, lte, sql } from 'drizzle-orm';
+import { and, eq, desc, gte, lte } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { jobProfiles, shifts, sickLeavePeriods } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
@@ -31,7 +31,7 @@ function toPublic(period: typeof sickLeavePeriods.$inferSelect, calc?: SickPerio
     startDate: period.startDate,
     endDate: period.endDate,
     notes: period.notes ?? null,
-    createAt: period.createdAt,
+    createdAt: period.createdAt,
     karensdag: calc?.karensdag ?? null,
     totalSickPayOre: calc?.totalSickPayOre ?? 0,
     totalWorkedMinutes: calc?.totalWorkedMinutes ?? 0,
@@ -50,10 +50,7 @@ async function calcForPeriod(
 
   const shiftInput = rows.map((s) => ({
     startAt: s.startAt,
-    workedMinutes:
-      s.baseOre != null
-        ? calcWorkedMinutes(s.startAt, s.endAt, s.breakMinutes)
-        : calcWorkedMinutes(s.startAt, s.endAt, s.breakMinutes),
+    workedMinutes: calcWorkedMinutes(s.startAt, s.endAt, s.breakMinutes),
   }));
 
   return calculateSickPayForPeriod({
@@ -71,7 +68,7 @@ export async function createSickLeave(userId: string, input: CreateSickLeaveInpu
   const profile = await getOwnedJobProfile(userId, input.jobProfileId);
 
   // Historikfönster: periodens start måste vara inom free/premium range (använd midnatt UTC på startDate)
-  const startInstant = new Date(`${input.startDate}T12:00:00+1:00`);
+  const startInstant = new Date(`${input.startDate}T12:00:00+01:00`);
   await resolveHistoryRange(userId, startInstant, startInstant);
 
   const inserted = await db
