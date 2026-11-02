@@ -1,4 +1,4 @@
-import { and, eq, desc, gte, lte } from 'drizzle-orm';
+import { and, eq, desc, gte, lte, ne } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { jobProfiles, shifts, sickLeavePeriods } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
@@ -20,6 +20,58 @@ import type {
 async function assertPremium(userId: string): Promise<void> {
   if (!(await userHasPremium(userId))) {
     throw new AppError(403, 'Sjukanmälan kräver Premium');
+  }
+}
+
+/** YYYY-MM-DD → Date around noon UTC so Stockholm-månad blir stabil. */
+function ymdToInstant(ymd: string): Date {
+  return new Date(`${ymd}T12:00:00.000Z`);
+}
+
+async function assertSickPeriodDatesAllowed(
+  userId: string,
+  startDate: string,
+  endDate: string,
+): Promise<void> {
+  if (endDate < startDate) {
+    throw new AppError(400, 'Slutdatum måste vara samma dag eller efter startdatum');
+  }
+  const startInstant = ymdToInstant(startDate);
+  await resolveHistoryRange(userId, startInstant, startInstant);
+
+  const todayKey = stockholmDateKey(new Date());
+  if (endDate <= todayKey) {
+    const endInstant = ymdToInstant(endDate);
+    await resolveHistoryRange(userId, endInstant, endInstant);
+  }
+}
+
+/** Avvisa överlappande perioder för samma jobbprofil (annars dubbel sjuklön i summary). */
+async function assertNoOverlappingPeriod(
+  userId: string,
+  jobProfileId: string,
+  startDate: string,
+  endDate: string,
+  excludeId?: string,
+): Promise<void> {
+  const conditions = [
+    eq(sickLeavePeriods.userId, userId),
+    eq(sickLeavePeriods.jobProfileId, jobProfileId),
+    lte(sickLeavePeriods.startDate, endDate),
+    gte(sickLeavePeriods.endDate, startDate),
+  ];
+  if (excludeId) {
+    conditions.push(ne(sickLeavePeriods.id, excludeId));
+  }
+
+  const overlap = await db
+    .select({ id: sickLeavePeriods.id })
+    .from(sickLeavePeriods)
+    .where(and(...conditions))
+    .limit(1);
+
+  if (overlap[0]) {
+    throw new AppError(400, 'Sjukperioden överlappar en befintlig period för samma jobbprofil');
   }
 }
 
@@ -63,13 +115,23 @@ async function calcForPeriod(
   });
 }
 
+async function getOwnedPeriodRow(userId: string, id: string) {
+  const matched = await db
+    .select()
+    .from(sickLeavePeriods)
+    .where(and(eq(sickLeavePeriods.id, id), eq(sickLeavePeriods.userId, userId)))
+    .limit(1);
+  const row = matched[0];
+  if (!row) throw new AppError(404, 'Sjukperioden hittades inte');
+  return row;
+}
+
 export async function createSickLeave(userId: string, input: CreateSickLeaveInput) {
   await assertPremium(userId);
   const profile = await getOwnedJobProfile(userId, input.jobProfileId);
 
-  // Historikfönster: periodens start måste vara inom free/premium range (använd midnatt UTC på startDate)
-  const startInstant = new Date(`${input.startDate}T12:00:00+01:00`);
-  await resolveHistoryRange(userId, startInstant, startInstant);
+  await assertSickPeriodDatesAllowed(userId, input.startDate, input.endDate);
+  await assertNoOverlappingPeriod(userId, input.jobProfileId, input.startDate, input.endDate);
 
   const inserted = await db
     .insert(sickLeavePeriods)
@@ -119,22 +181,23 @@ export async function listSickLeave(userId: string, query: ListSickLeaveQuery) {
 
 export async function getSickLeaveById(userId: string, id: string) {
   await assertPremium(userId);
-  const matched = await db
-    .select()
-    .from(sickLeavePeriods)
-    .where(and(eq(sickLeavePeriods.id, id), eq(sickLeavePeriods.userId, userId)))
-    .limit(1);
-
-  const row = matched[0];
-  if (!row) throw new AppError(404, 'Sjukperioden hittades inte');
+  const row = await getOwnedPeriodRow(userId, id);
+  await assertSickPeriodDatesAllowed(userId, row.startDate, row.endDate);
   const profile = await getOwnedJobProfile(userId, row.jobProfileId);
   return toPublic(row, await calcForPeriod(row, profile.hourlyWage));
 }
 
 export async function updatedSickLeave(userId: string, id: string, input: UpdateSickLeaveInput) {
   await assertPremium(userId);
-  const existing = await getSickLeaveById(userId, id);
+  const existing = await getOwnedPeriodRow(userId, id);
+
+  const nextStart = input.startDate ?? existing.startDate;
+  const nextEnd = input.endDate ?? existing.endDate;
   const nextProfileId = input.jobProfileId ?? existing.jobProfileId;
+
+  await assertSickPeriodDatesAllowed(userId, nextStart, nextEnd);
+  await assertNoOverlappingPeriod(userId, nextProfileId, nextStart, nextEnd, id);
+
   const profile = await getOwnedJobProfile(userId, nextProfileId);
 
   const updated = await db
@@ -163,8 +226,9 @@ export async function deleteSickLeave(userId: string, id: string): Promise<void>
   if (!deleted[0]) throw new AppError(404, 'Sjukperioden hittades inte');
 }
 
-/** För summary: alla perioder som överlappar from/to. */
+/** För summary: alla perioder som överlappar from/to. Premium-only. */
 export async function loadSickPeriodsOverlapping(userId: string, from: Date, to: Date) {
+  await assertPremium(userId);
   const fromKey = stockholmDateKey(from);
   const toKey = stockholmDateKey(to);
 

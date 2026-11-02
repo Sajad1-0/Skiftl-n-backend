@@ -1,5 +1,3 @@
-import { stockholmYearMonth } from '../tax/month-bounds.js';
-
 export const SICK_PAY_RATE = 0.8; // 80%
 
 export interface SickDayBreakdown {

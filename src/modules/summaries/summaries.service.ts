@@ -25,7 +25,6 @@ import {
   stockholmDateKey,
   type SickDayBreakdown,
 } from '../../lib/sick/sick-pay.js';
-import e from 'express';
 
 export interface ProfileBreakdown {
   jobProfileId: string;
@@ -296,16 +295,15 @@ export async function getMonthlySummary(
     }
   }
 
+  const settings = await getTaxSettings(userId);
   grossOre += sickPayOre;
-  if (sickPayOre > 0 && !(premium && (await getTaxSettings(userId)))) {
-    // flatNet för sjuklön: använd snitt av profiler eller 30
+  if (sickPayOre > 0 && !(premium && settings)) {
     const avgRate =
       [...byProfile.values()].reduce((s, p) => s + p.taxRate, 0) / Math.max(1, byProfile.size) ||
       30;
     flatNetOre += calcNetOre(sickPayOre, avgRate);
   }
 
-  const settings = await getTaxSettings(userId);
   let taxMode: 'table' | 'flat' = 'flat';
   let taxOre = grossOre - flatNetOre;
   let netOre = flatNetOre;
@@ -335,13 +333,6 @@ export async function getMonthlySummary(
     for (const profile of profiles) {
       profile.taxOre = profile.grossOre - profile.netOre;
     }
-  } else if (sickPayOre > 0) {
-    const avgRate =
-      profiles.reduce((s, p) => s + p.taxRate, 0) / Math.max(1, profiles.length) || 30;
-    const sickNet = calcNetOre(sickPayOre, avgRate);
-    // flatNetOre inkluderar redan shift-netto; lägg till sick om du inte redan gjort det ovan
-    taxOre = grossOre - flatNetOre;
-    netOre = flatNetOre;
   }
 
   const goalProgressPercent =
