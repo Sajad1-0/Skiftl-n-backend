@@ -15,7 +15,6 @@ import {
   archiveJobProfile,
   unarchiveJobProfile,
 } from './job-profiles.service.js';
-import { success } from 'zod';
 
 function requiredUser(req: Request): string {
   if (!req.user) throw new AppError(401, 'Inte autentiserad');

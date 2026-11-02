@@ -11,6 +11,7 @@ import healthRoutes from './routes/health.routes.js';
 import shiftsRoutes from './modules/shifts/shifts.routes.js';
 import summariesRoutes from './modules/summaries/summaries.routes.js';
 import taxSettingsRoutes from './modules/tax-settings/tax-settings.routes.js';
+import sickLeaveRoutes from './modules/sick-leave/sick-leave.routes.js';
 
 export function createApp(): Express {
   const app = express();
@@ -28,6 +29,7 @@ export function createApp(): Express {
   app.use('/collective-agreements', agreementsRoutes);
   app.use('/job-profiles', jobProfileRoutes);
   app.use('/shifts', shiftsRoutes);
+  app.use('/sick-leave', sickLeaveRoutes);
   app.use('/summaries', summariesRoutes);
   app.use('/tax-settings', taxSettingsRoutes);
 
