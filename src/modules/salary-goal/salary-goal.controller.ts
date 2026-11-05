@@ -24,13 +24,14 @@ export async function upsertSalaryGoalController(
       return;
     }
 
-    const salaryData = await upsertSalaryGoal(userId, parsed.data.monthlySummaryGoal);
+    const salaryData = await upsertSalaryGoal(userId, parsed.data.monthlySalaryGoalOre);
 
     res.status(200).json({
       success: true,
-      message: 'Lönemål skapades',
+      message: 'Lönemål sparat',
       data: salaryData,
     });
+
   } catch (error) {
     next(error);
   }

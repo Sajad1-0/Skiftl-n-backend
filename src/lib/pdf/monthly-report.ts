@@ -1,9 +1,18 @@
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, type PDFPage } from 'pdf-lib';
+
 import type { MonthlySummary } from '../../modules/summaries/summaries.service.js';
-import { sum } from 'drizzle-orm';
 
 function kronor(ore: number): string {
   return `${(ore / 100).toFixed(2)} kr`;
+}
+
+/** Helvetica WinAnsi saknar å/ä/ö — ASCII-ersättning i PDF-text. */
+function pdfSafe(text: string): string {
+  return text
+    .replace(/[åä]/gi, 'a')
+    .replace(/ö/gi, 'o')
+    .replace(/–/g, '-')
+    .replace(/—/g, '-');
 }
 
 export async function buildMonthlySummaryPdf(
@@ -11,25 +20,32 @@ export async function buildMonthlySummaryPdf(
   opts: { userLabel: string; monthLabel: string },
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
-  const page = doc.addPage([595, 842]); // A4
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
+  let page: PDFPage = doc.addPage([595, 842]);
   let y = 800;
   const left = 50;
-  const line = (text: string, size = 11, useBold = false) => {
-    page.drawText(text, {
+
+  const ensureSpace = (needed: number): void => {
+    if (y >= needed) return;
+    page = doc.addPage([595, 842]);
+    y = 800;
+  };
+
+  const line = (text: string, size = 11, useBold = false): void => {
+    ensureSpace(size + 8);
+    page.drawText(pdfSafe(text), {
       x: left,
       y,
       size,
       font: useBold ? bold : font,
       color: rgb(0.1, 0.1, 0.1),
     });
-
     y -= size + 8;
   };
 
-  line('Shiftkit - Månadsrapport', 18, true);
+  line('Shiftkit - Manadsrapport', 18, true);
   line(opts.userLabel, 11);
   line(opts.monthLabel, 11);
   y -= 8;
@@ -38,13 +54,15 @@ export async function buildMonthlySummaryPdf(
   line(`Timmar: ${(summary.workedMinutes / 60).toFixed(1)} h`);
   line(`Brutto: ${kronor(summary.grossOre)}`);
   line(`OB: ${kronor(summary.obOre)}`);
-  if (summary.sickPayOre > 0) line(`Sjuklön: ${kronor(summary.sickPayOre)}`);
+  if (summary.sickPayOre > 0) {
+    line(`Sjuklon: ${kronor(summary.sickPayOre)}`);
+  }
   line(`Skatt (${summary.taxMode}): ${kronor(summary.taxOre)}`);
   line(`Netto: ${kronor(summary.netOre)}`, 12, true);
 
   if (summary.goalOre != null) {
     y -= 6;
-    line(`Lönemål: ${kronor(summary.goalOre)} (${summary.goalProgressPercent} %)`);
+    line(`Lonemal: ${kronor(summary.goalOre)} (${summary.goalProgressPercent} %)`);
   }
 
   y -= 12;
@@ -54,18 +72,16 @@ export async function buildMonthlySummaryPdf(
       `${p.name}: ${p.shiftCount} pass, ${(p.workedMinutes / 60).toFixed(1)} h, brutto ${kronor(p.grossOre)}, netto ${kronor(p.netOre)}`,
       9,
     );
-    if (y < 60) break;
   }
 
-  if (summary.sickLeave?.length) {
+  if (summary.sickLeave.length > 0) {
     y -= 10;
-    line('Sjukanmälan', 13, true);
+    line('Sjukanmalan', 13, true);
     for (const s of summary.sickLeave) {
       line(
-        `${s.startDate}–${s.endDate} (${s.profileName}): karens ${s.karensdag ?? '—'}, ${kronor(s.sickPayOre)}`,
+        `${s.startDate}-${s.endDate} (${s.profileName}): karens ${s.karensdag ?? '-'}, ${kronor(s.sickPayOre)}`,
         9,
       );
-      if (y < 60) break;
     }
   }
 

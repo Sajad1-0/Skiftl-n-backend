@@ -169,15 +169,19 @@ export async function getMonthlySummary(
     .innerJoin(jobProfiles, eq(shifts.jobProfileId, jobProfiles.id))
     .where(and(...conditions));
 
-  const userRows = await db
-    .select({ monthlySalaryGoal: users.monthlySalaryGoal })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  const goalOre = userRows[0]?.monthlySalaryGoal ?? null;
-
   const premium = await userHasPremium(userId);
+
+  const userRows = premium
+    ? await db
+        .select({ monthlySalaryGoal: users.monthlySalaryGoal })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+    : [];
+
+  // Lönemål är Premium — free får null / 0 % progress.
+  const goalOre = premium ? (userRows[0]?.monthlySalaryGoal ?? null) : null;
+
 
   const sickRows =
     premium && rangeIsPremium ? await loadSickPeriodsOverlapping(userId, from, to) : [];

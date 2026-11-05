@@ -35,14 +35,16 @@ interface AuthResponse {
 const SALT_ROUNDS = 12;
 
 function toPublicUser(user: User): PublicUser {
+  const isPremium = effectiveIsPremium(user);
   return {
     id: user.id,
     firstName: user.firstName,
     lastName: user.lastName ?? null,
     email: user.email,
-    isPremium: effectiveIsPremium(user),
+    isPremium,
     hasStripeCustomer: Boolean(user.stripeCustomerId),
-    monthlySalaryGoal: user.monthlySalaryGoal ?? null,
+    // Lönemål är Premium — maska för free/downgrade (DB behåller värdet).
+    monthlySalaryGoal: isPremium ? (user.monthlySalaryGoal ?? null) : null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

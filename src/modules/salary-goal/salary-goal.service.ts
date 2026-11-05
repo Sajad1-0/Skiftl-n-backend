@@ -7,6 +7,10 @@ import { userHasPremium } from '../../lib/premium/premium.js';
 export async function getSalaryGoal(
   userId: string,
 ): Promise<{ monthlySalaryGoalOre: number | null }> {
+  if (!(await userHasPremium(userId))) {
+    return { monthlySalaryGoalOre: null };
+  }
+
   const rows = await db
     .select({ monthlySalaryGoal: users.monthlySalaryGoal })
     .from(users)
