@@ -8,11 +8,7 @@ function kronor(ore: number): string {
 
 /** Helvetica WinAnsi saknar å/ä/ö — ASCII-ersättning i PDF-text. */
 function pdfSafe(text: string): string {
-  return text
-    .replace(/[åä]/gi, 'a')
-    .replace(/ö/gi, 'o')
-    .replace(/–/g, '-')
-    .replace(/—/g, '-');
+  return text.replace(/[åä]/gi, 'a').replace(/ö/gi, 'o').replace(/–/g, '-').replace(/—/g, '-');
 }
 
 export async function buildMonthlySummaryPdf(
@@ -63,6 +59,15 @@ export async function buildMonthlySummaryPdf(
   if (summary.goalOre != null) {
     y -= 6;
     line(`Lonemal: ${kronor(summary.goalOre)} (${summary.goalProgressPercent} %)`);
+    if (summary.goalRemainingOre != null && summary.goalRemainingOre > 0) {
+      const hoursLabel =
+        summary.hoursToGoalEstimate != null
+          ? `ca ${summary.hoursToGoalEstimate} h kvar`
+          : 'timmar kvar: okant';
+      line(`Kvar till mal: ${kronor(summary.goalRemainingOre)} (${hoursLabel})`, 10);
+    } else if (summary.goalRemainingOre === 0) {
+      line('Malet ar natt for perioden', 10);
+    }
   }
 
   y -= 12;

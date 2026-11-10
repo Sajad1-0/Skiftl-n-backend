@@ -25,6 +25,10 @@ import {
   stockholmDateKey,
   type SickDayBreakdown,
 } from '../../lib/sick/sick-pay.js';
+import {
+  estimateHoursToGoal,
+  fallbackNetOrePerHourFromProfiles,
+} from '../../lib/wageGoal/hours-to-goal.js';
 
 export interface ProfileBreakdown {
   jobProfileId: string;
@@ -67,6 +71,9 @@ export interface MonthlySummary {
   taxMode: 'table' | 'flat';
   goalOre: number | null;
   goalProgressPercent: number;
+  goalRemainingOre: number | null;
+  hoursToGoalEstimate: number | null;
+  estimatedNetOrePerHour: number | null;
   byJobProfile: ProfileBreakdown[];
   sickPayOre: number;
   sickLeave: SickLeaveSummaryRow[];
@@ -179,8 +186,10 @@ export async function getMonthlySummary(
         .limit(1)
     : [];
 
-  // Lönemål är Premium — free får null / 0 % progress.
-  const goalOre = premium ? (userRows[0]?.monthlySalaryGoal ?? null) : null;
+  // Lönemål är Premium — free får null. Filtrerad summary (jobProfileId) hoppar över mål
+  // så progress/timmar inte blandas med ett helmånadsmål.
+  const goalOre =
+    premium && !query.jobProfileId ? (userRows[0]?.monthlySalaryGoal ?? null) : null;
 
 
   const sickRows =
@@ -236,6 +245,8 @@ export async function getMonthlySummary(
 
   let shiftCount = 0;
   let workedMinutes = 0;
+  /** Betalda arbetstimmar (exkl. sjukdagar) — används för netto/timme mot lönemål. */
+  let paidWorkedMinutes = 0;
   let breakMinutes = 0;
   let baseOre = 0;
   let obOre = 0;
@@ -266,7 +277,10 @@ export async function getMonthlySummary(
 
     if (onSick) continue;
 
+    paidWorkedMinutes += pay.workedMinutes;
+
     const flatNet = calcNetOre(pay.grossOre, tax);
+
     baseOre += pay.baseOre;
     obOre += pay.obOre;
     grossOre += pay.grossOre;
@@ -342,6 +356,39 @@ export async function getMonthlySummary(
   const goalProgressPercent =
     goalOre && goalOre > 0 ? Math.min(100, Math.round((netOre / goalOre) * 100)) : 0;
 
+  // Rate-netto exkl. sjuklön så sjukdagar inte snedvrider netto/timme.
+  const rateNetOre = Math.max(0, netOre - sickPayOre);
+
+  let fallbackNetPerHour: number | null = null;
+  if (goalOre != null && goalOre > 0 && (paidWorkedMinutes <= 0 || rateNetOre <= 0)) {
+    fallbackNetPerHour = await fallbackNetOrePerHourFromProfiles(userId);
+  }
+
+  const hoursGoal = estimateHoursToGoal({
+    goalOre,
+    netOre,
+    rateNetOre,
+    rateWorkedMinutes: paidWorkedMinutes,
+    fallbackNetOrePerHour: fallbackNetPerHour,
+  });
+
+  // Defense-in-depth: free får aldrig mål-/timfält.
+  const goalFields = premium
+    ? {
+        goalOre,
+        goalProgressPercent,
+        goalRemainingOre: hoursGoal.goalRemainingOre,
+        hoursToGoalEstimate: hoursGoal.hoursToGoalEstimate,
+        estimatedNetOrePerHour: hoursGoal.estimatedNetOrePerHour,
+      }
+    : {
+        goalOre: null,
+        goalProgressPercent: 0,
+        goalRemainingOre: null,
+        hoursToGoalEstimate: null,
+        estimatedNetOrePerHour: null,
+      };
+
   return {
     from,
     to,
@@ -354,8 +401,7 @@ export async function getMonthlySummary(
     taxOre,
     netOre,
     taxMode,
-    goalOre,
-    goalProgressPercent,
+    ...goalFields,
     byJobProfile: profiles,
     sickPayOre,
     sickLeave: premium ? sickLeave : [],
