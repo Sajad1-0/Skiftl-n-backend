@@ -17,9 +17,6 @@
     "db:seed:holidays": "tsx src/db/seed-holidays.ts",
     "db:seed:tax-tables": "tsx src/db/seed-tax-tables.ts"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": ["bcrypt", "esbuild"]
-  },
   "keywords": [],
   "author": "",
   "license": "ISC",
