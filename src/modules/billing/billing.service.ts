@@ -66,6 +66,8 @@ export async function createCheckoutSessionUrl(userId: string): Promise<{ url: s
     client_reference_id: userId,
     metadata: { userId },
     subscription_data: { metadata: { userId } },
+    // Shiftkit säljer egen SaaS-prenumeration — inte Stripe Managed Payments (kräver product tax_code).
+    managed_payments: { enabled: false },
   });
 
   if (!session.url) throw new AppError(500, 'Kunde inte skapa Stripe Checkout');
