@@ -19,7 +19,7 @@ Companion frontend: [Skiftl-n-frontend](https://github.com/Sajad1-0/Skiftl-n-fro
 - pnpm 11+
 - PostgreSQL database
 
-## Setup
+## Setup (local)
 
 ```bash
 pnpm install
@@ -32,15 +32,15 @@ cp .env.example .env
 | Variable | Description |
 |----------|-------------|
 | `NODE_ENV` | `development` / `production` |
-| `PORT` | API port (default `3001`) |
+| `PORT` | API port (default `3001`; Railway sets this) |
 | `DATABASE_URL` | Postgres connection string |
 | `JWT_SECRET` | Long random secret (≥ 32 chars) |
 | `JWT_EXPIRES_IN_SECONDS` | Token TTL (default 7 days) |
-| `FRONTEND_URL` | CORS / Stripe redirect base (`http://localhost:3000`) |
-| `STRIPE_SECRET_KEY` | Stripe secret (`sk_test_…`) |
-| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_…`) |
+| `FRONTEND_URL` | Stripe success/cancel/portal base URL |
+| `STRIPE_SECRET_KEY` | Stripe secret (`sk_test_…` or `sk_live_…`) |
+| `STRIPE_WEBHOOK_SECRET` | Webhook **signing** secret (`whsec_…` — not endpoint id `we_…`) |
 | `STRIPE_PRICE_ID` | Premium monthly Price ID (`price_…`) |
-| `PREMIUM_BYPASS_EMAILS` | Optional comma-separated emails treated as Premium (dev only) |
+| `PREMIUM_BYPASS_EMAILS` | Optional comma-separated emails treated as Premium (prefer empty in production) |
 
 ### Database
 
@@ -95,6 +95,72 @@ Local webhook forwarding:
 ```bash
 stripe listen --forward-to localhost:3001/billing/webhook
 ```
+
+## Deployment (Railway)
+
+Production layout:
+
+| Piece | Host |
+|-------|------|
+| API | **Railway** (this repo) |
+| Postgres | **Railway** Postgres plugin |
+| Frontend | **Vercel** ([Skiftl-n-frontend](https://github.com/Sajad1-0/Skiftl-n-frontend)) |
+
+### Railway service variables
+
+On the **API** service, set at least:
+
+- `DATABASE_URL` → prefer a **Variable Reference** to Postgres: `${{Postgres.DATABASE_URL}}` (private `*.railway.internal` URL)
+- `JWT_SECRET`
+- `NODE_ENV=production`
+- `FRONTEND_URL` → your Vercel URL (e.g. `https://your-app.vercel.app`), **not** `localhost`
+- `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET` (`whsec_…`)
+
+Public domain: Railway → API service → Networking / Domains  
+(e.g. `https://….up.railway.app`). Health check: `GET /health`.
+
+### Migrations & seeds against Railway Postgres
+
+`postgres.railway.internal` only resolves **inside** Railway. From your laptop:
+
+```bash
+# one-time CLI setup
+curl -fsSL agents.railway.com | sh
+source "$HOME/.railway/env"
+railway login
+railway link   # select project + this API (or Postgres) service
+```
+
+**Option A — SSH tunnel (recommended, no public DB):**
+
+```bash
+# terminal 1 — keep open
+railway connect Postgres --tunnel-only
+
+# terminal 2 — use the printed URL (127.0.0.1:port)
+DATABASE_URL='postgresql://…@127.0.0.1:PORT/railway' pnpm db:migrate
+DATABASE_URL='…' pnpm db:seed:agreements
+DATABASE_URL='…' pnpm db:seed:holidays
+DATABASE_URL='…' pnpm db:seed:tax-tables
+```
+
+**Option B — Public TCP proxy:** Postgres → Connect → Public Network → Add Public Access → use `DATABASE_PUBLIC_URL` as `DATABASE_URL` for the commands above. Remove public access when done if you prefer.
+
+Do **not** paste production passwords into chat or commit them.
+
+### Stripe in production
+
+1. Webhook endpoint: `https://<api-domain>/billing/webhook`
+2. Events: at least `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`
+3. Signing secret → `STRIPE_WEBHOOK_SECRET` (`whsec_…`)
+4. Checkout disables Stripe **Managed Payments** in code (`managed_payments.enabled=false`) so product tax codes are not required for this SaaS subscription flow
+
+### Password rotation
+
+1. Tunnel in and `ALTER USER postgres WITH PASSWORD '…'`
+2. Update Postgres `POSTGRES_PASSWORD` / `PGPASSWORD` / `DATABASE_URL`
+3. Keep API `DATABASE_URL` as a reference to Postgres so it stays in sync
+4. Redeploy the API and verify `/health` → `database: connected`
 
 ## Free vs Premium (enforced server-side)
 
