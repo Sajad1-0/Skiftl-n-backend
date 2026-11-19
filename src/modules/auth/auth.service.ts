@@ -7,7 +7,10 @@ import { db } from '../../db/index.js';
 import { users, type User } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { LoginInput, RegisterInput } from './auth.schema.js';
-import { effectiveIsPremium } from '../../lib/premium/premium.js';
+import {
+  resolvePremiumAccess,
+  type PremiumSource,
+} from '../../lib/premium/premium.js';
 
 interface JWTPayload {
   userId: string;
@@ -20,6 +23,10 @@ interface PublicUser {
   lastName: string | null;
   email: string;
   isPremium: boolean;
+  /** Varifrån Premium kommer just nu (UI: banner / knappar). */
+  premiumSource: PremiumSource;
+  /** ISO-slutdatum om source === 'beta'; annars null. */
+  premiumBetaEndsAt: string | null;
   /** True om användaren har Stripe-kund (kan öppna billing portal). */
   hasStripeCustomer: boolean;
   monthlySalaryGoal: number | null;
@@ -35,16 +42,18 @@ interface AuthResponse {
 const SALT_ROUNDS = 12;
 
 function toPublicUser(user: User): PublicUser {
-  const isPremium = effectiveIsPremium(user);
+  const access = resolvePremiumAccess(user);
   return {
     id: user.id,
     firstName: user.firstName,
     lastName: user.lastName ?? null,
     email: user.email,
-    isPremium,
+    isPremium: access.isPremium,
+    premiumSource: access.source,
+    premiumBetaEndsAt: access.betaEndsAt,
     hasStripeCustomer: Boolean(user.stripeCustomerId),
     // Lönemål är Premium — maska för free/downgrade (DB behåller värdet).
-    monthlySalaryGoal: isPremium ? (user.monthlySalaryGoal ?? null) : null,
+    monthlySalaryGoal: access.isPremium ? (user.monthlySalaryGoal ?? null) : null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

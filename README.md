@@ -41,6 +41,7 @@ cp .env.example .env
 | `STRIPE_WEBHOOK_SECRET` | Webhook **signing** secret (`whsec_…` — not endpoint id `we_…`) |
 | `STRIPE_PRICE_ID` | Premium monthly Price ID (`price_…`) |
 | `PREMIUM_BYPASS_EMAILS` | Optional comma-separated emails treated as Premium (prefer empty in production) |
+| `PREMIUM_BETA_ENDS_AT` | Optional ISO-8601 end of Premium beta (e.g. `2026-12-15T23:59:59+01:00`). Empty = off. While active, all users get Premium server-side. |
 
 ### Database
 

@@ -18,6 +18,14 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_ID: z.string().optional(),
   PREMIUM_BYPASS_EMAILS: z.string().default(''),
+  /**
+   * ISO-8601 med offset, t.ex. 2026-12-15T23:59:59+01:00.
+   * Tom / saknas = ingen Premium-beta.
+   */
+  PREMIUM_BETA_ENDS_AT: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().datetime({ offset: true }).optional(),
+  ),
 });
 
 const parsed = envSchema.safeParse(process.env);
