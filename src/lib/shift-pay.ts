@@ -40,9 +40,16 @@ export function calcNetOre(grossOre: number, taxRatePercent: number): number {
   return Math.round(grossOre * (1 - rate / 100));
 }
 
-export function parseTaxRate(taxRate: string | number): number {
+export function tryParseTaxRate(taxRate: string | number | null | undefined): number | null {
+  if (taxRate == null || taxRate === '') return null;
   const n = typeof taxRate === 'number' ? taxRate : Number(taxRate);
-  if (!Number.isFinite(n)) {
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return n;
+}
+
+export function parseTaxRate(taxRate: string | number): number {
+  const n = tryParseTaxRate(taxRate);
+  if (n == null) {
     throw new AppError(500, 'Ogiltig skattesats i jobbprofil');
   }
 

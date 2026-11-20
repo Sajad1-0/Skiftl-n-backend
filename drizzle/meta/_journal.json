@@ -71,6 +71,13 @@
       "when": 1794000000000,
       "tag": "0009_sick_leave_periods",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0010_optional_job_profile_tax_rate",
+      "breakpoints": true
     }
   ]
 }

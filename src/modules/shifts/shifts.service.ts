@@ -4,7 +4,7 @@ import { db } from '../../db/index.js';
 import { jobProfiles, shifts, type JobProfile, type Shift } from '../../db/schema.js';
 import { calculateObPay } from '../../lib/ob/engine.js';
 import { loadObPayContext } from '../../lib/ob/context.js';
-import { calcWorkedMinutes, parseTaxRate } from '../../lib/shift-pay.js';
+import { calcWorkedMinutes, tryParseTaxRate } from '../../lib/shift-pay.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type {
   BulkCreateShiftsInput,
@@ -269,13 +269,13 @@ async function estimateNetForCreatedShift(
   }
 
   const tableCtx = await resolveTableCtx(userId);
-  const flat = parseTaxRate(profile.taxRate);
+  const flat = tryParseTaxRate(profile.taxRate);
 
   return estimateShiftNetOre({
     shiftGrossOre: publicShift.grossOre,
     grossBeforeOre: grossBefore,
     ...(tableCtx ? { table: tableCtx } : {}),
-    ...(!tableCtx ? { flatTaxRatePercent: flat } : {}),
+    ...(!tableCtx && flat != null ? { flatTaxRatePercent: flat } : {}),
   });
 }
 
@@ -385,7 +385,8 @@ export async function listShifts(userId: string, query: ListShiftsQuery): Promis
   const taxRateByProfileId = new Map<string, number>();
   const publics = rows
     .map((row) => {
-      taxRateByProfileId.set(row.shift.jobProfileId, parseTaxRate(row.taxRate));
+      const flat = tryParseTaxRate(row.taxRate);
+      if (flat != null) taxRateByProfileId.set(row.shift.jobProfileId, flat);
       return toPublicShift(row.shift, undefined, row.hourlyWage);
     })
     .filter((s) => {
@@ -439,7 +440,8 @@ async function loadMonthContextShifts(
   for (const row of rows) {
     const { year, month } = stockholmYearMonth(row.shift.startAt);
     if (!monthKeys.has(`${year}-${month}`)) continue;
-    taxRateByProfileId.set(row.shift.jobProfileId, parseTaxRate(row.taxRate));
+    const flat = tryParseTaxRate(row.taxRate);
+    if (flat != null) taxRateByProfileId.set(row.shift.jobProfileId, flat);
     context.push(toPublicShift(row.shift, undefined, row.hourlyWage));
   }
   return context;

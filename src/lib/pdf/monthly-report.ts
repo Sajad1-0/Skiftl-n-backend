@@ -2,7 +2,8 @@ import { PDFDocument, StandardFonts, rgb, type PDFPage } from 'pdf-lib';
 
 import type { MonthlySummary } from '../../modules/summaries/summaries.service.js';
 
-function kronor(ore: number): string {
+function kronor(ore: number | null): string {
+  if (ore == null) return '-';
   return `${(ore / 100).toFixed(2)} kr`;
 }
 

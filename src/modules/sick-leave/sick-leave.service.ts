@@ -236,6 +236,7 @@ export async function loadSickPeriodsOverlapping(userId: string, from: Date, to:
     .select({
       period: sickLeavePeriods,
       hourlyWage: jobProfiles.hourlyWage,
+      taxRate: jobProfiles.taxRate,
       profileName: jobProfiles.name,
     })
     .from(sickLeavePeriods)

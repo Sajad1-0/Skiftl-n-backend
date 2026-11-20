@@ -137,8 +137,8 @@ export const jobProfiles = pgTable(
     name: varchar('name', { length: 100 }).notNull(),
     // Timlön i öre per timme (brutto)
     hourlyWage: integer('hourly_wage').notNull(),
-    // tex. 30.00 = 30%
-    taxRate: numeric('tax_rate', { precision: 5, scale: 2 }).notNull(),
+    // tex. 30.00 = 30%; null = ingen schablon (Premium använder tabell)
+    taxRate: numeric('tax_rate', { precision: 5, scale: 2 }),
     employerName: varchar('employer_name', { length: 200 }),
     isPrimary: boolean('is_primary').notNull().default(false),
     /** null = aktiv; satt = arkiverad (räknas inte mot free/premium-cap) */

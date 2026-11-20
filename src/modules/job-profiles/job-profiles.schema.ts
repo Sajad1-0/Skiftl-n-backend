@@ -1,13 +1,16 @@
 import { z } from 'zod';
 
+const taxRateInputSchema = z.number().min(0).max(100).nullable().optional();
+
+function toStoredTaxRate(value: number | null | undefined): string | null {
+  if (value == null) return null;
+  return value.toFixed(2);
+}
+
 export const createJobProfileSchema = z.object({
   name: z.string().trim().min(2).max(100),
   hourlyWage: z.number().int().positive(), //Öre
-  taxRate: z
-    .number()
-    .min(0)
-    .max(100)
-    .transform((value) => value.toFixed(2)),
+  taxRate: taxRateInputSchema.transform((value) => toStoredTaxRate(value)),
   employerName: z.string().trim().min(2).max(200).optional(),
   isPrimary: z.boolean().optional(),
   collectiveAgreementId: z.uuid().nullable().optional(),
@@ -15,6 +18,10 @@ export const createJobProfileSchema = z.object({
 
 export const updateJobProfileSchema = createJobProfileSchema.partial().extend({
   employerName: z.union([z.string().trim().min(2).max(200), z.null()]).optional(),
+  taxRate: taxRateInputSchema.transform((value) => {
+    if (value === undefined) return undefined;
+    return toStoredTaxRate(value);
+  }),
 });
 
 export const jobProfileIdSchema = z.object({

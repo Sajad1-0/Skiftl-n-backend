@@ -15,7 +15,7 @@ interface PublicJobProfile {
   userId: string;
   name: string;
   hourlyWage: number;
-  taxRate: string;
+  taxRate: string | null;
   employerName: string | null;
   isPrimary: boolean;
   collectiveAgreementId: string | null;

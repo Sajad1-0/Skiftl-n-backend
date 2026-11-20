@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 
 import { db } from '../../db/index.js';
 import { jobProfiles } from '../../db/schema.js';
-import { calcNetOre, parseTaxRate } from '../shift-pay.js';
+import { calcNetOre, tryParseTaxRate } from '../shift-pay.js';
 
 export interface HoursToGoalResult {
   goalRemainingOre: number | null;
@@ -12,7 +12,7 @@ export interface HoursToGoalResult {
 
 export function estimateHoursToGoal(input: {
   goalOre: number | null;
-  netOre: number;
+  netOre: number | null;
   rateNetOre: number;
   rateWorkedMinutes: number;
   fallbackNetOrePerHour: number | null;
@@ -20,6 +20,14 @@ export function estimateHoursToGoal(input: {
   const goalOre = input.goalOre;
 
   if (goalOre === null || goalOre <= 0) {
+    return {
+      goalRemainingOre: null,
+      hoursToGoalEstimate: null,
+      estimatedNetOrePerHour: null,
+    };
+  }
+
+  if (input.netOre == null) {
     return {
       goalRemainingOre: null,
       hoursToGoalEstimate: null,
@@ -81,7 +89,8 @@ export async function fallbackNetOrePerHourFromProfiles(userId: string): Promise
   const primary = rows.find((r) => r.isPrimary) ?? rows[0];
   if (!primary) return null;
 
-  const tax = parseTaxRate(primary.taxRate);
+  const tax = tryParseTaxRate(primary.taxRate);
+  if (tax == null) return null;
 
   // 1h brutto = hourlyWage öre -> netto via schablon
   return calcNetOre(primary.hourlyWage, tax);

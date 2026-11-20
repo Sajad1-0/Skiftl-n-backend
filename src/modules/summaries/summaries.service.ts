@@ -10,7 +10,7 @@ import {
   calcNetOre,
   calcWorkedMinutes,
   inclusiveEndBound,
-  parseTaxRate,
+  tryParseTaxRate,
 } from '../../lib/shift-pay.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import { getTaxSettings } from '../tax-settings/tax-settings.service.js';
@@ -33,15 +33,15 @@ import {
 export interface ProfileBreakdown {
   jobProfileId: string;
   name: string;
-  taxRate: number;
+  taxRate: number | null;
   shiftCount: number;
   workedMinutes: number;
   breakMinutes: number;
   baseOre: number;
   obOre: number;
   grossOre: number;
-  taxOre: number;
-  netOre: number;
+  taxOre: number | null;
+  netOre: number | null;
 }
 
 export interface SickLeaveSummaryRow {
@@ -64,9 +64,9 @@ export interface MonthlySummary {
   baseOre: number;
   obOre: number;
   grossOre: number;
-  /** Skatt i öre (månadsnivå vid tabell, annars summa av flat) */
-  taxOre: number;
-  netOre: number;
+  /** Skatt i öre (månadsnivå vid tabell, annars summa av flat). null om schablon saknas. */
+  taxOre: number | null;
+  netOre: number | null;
   /** table = skattetabell; flat = jobbprofilens taxRate */
   taxMode: 'table' | 'flat';
   goalOre: number | null;
@@ -113,7 +113,10 @@ function allocateNetByGross(
   if (profiles.length === 0) return;
 
   if (totalGrossOre <= 0) {
-    for (const p of profiles) p.netOre = 0;
+    for (const p of profiles) {
+      p.netOre = 0;
+      p.taxOre = 0;
+    }
     return;
   }
 
@@ -206,6 +209,9 @@ export async function getMonthlySummary(
 
   const sickLeave: SickLeaveSummaryRow[] = [];
   let sickPayOre = 0;
+  /** Flat-netto för sjuklön, summerat per periods egna taxRate. */
+  let sickFlatNetOre = 0;
+  let sickFlatIncomplete = false;
 
   for (const r of sickRows) {
     const allShifts = await db
@@ -228,6 +234,15 @@ export async function getMonthlySummary(
     const daysInMonth = calc.days.filter((d) => d.date >= fromKey && d.date <= toKey);
     const monthSickPay = daysInMonth.reduce((sum, d) => sum + d.sickPayOre, 0);
     sickPayOre += monthSickPay;
+
+    if (monthSickPay > 0) {
+      const tax = tryParseTaxRate(r.taxRate);
+      if (tax == null) {
+        sickFlatIncomplete = true;
+      } else {
+        sickFlatNetOre += calcNetOre(monthSickPay, tax);
+      }
+    }
 
     sickLeave.push({
       periodId: r.period.id,
@@ -252,6 +267,7 @@ export async function getMonthlySummary(
   let obOre = 0;
   let grossOre = 0;
   let flatNetOre = 0;
+  let flatTaxIncomplete = false;
 
   for (const row of rows) {
     const startOk = rangeIsPremium
@@ -261,7 +277,7 @@ export async function getMonthlySummary(
 
     const onSick = isShiftOnSickWorkday(row.shift.startAt, row.profileId, sickPeriodMeta);
 
-    const tax = parseTaxRate(row.taxRate);
+    const tax = tryParseTaxRate(row.taxRate);
     const pay = shiftPaySnapshot(
       row.shift.startAt,
       row.shift.endAt,
@@ -279,12 +295,13 @@ export async function getMonthlySummary(
 
     paidWorkedMinutes += pay.workedMinutes;
 
-    const flatNet = calcNetOre(pay.grossOre, tax);
+    if (tax == null) flatTaxIncomplete = true;
+    const flatNet = tax == null ? null : calcNetOre(pay.grossOre, tax);
 
     baseOre += pay.baseOre;
     obOre += pay.obOre;
     grossOre += pay.grossOre;
-    flatNetOre += flatNet;
+    if (flatNet != null) flatNetOre += flatNet;
 
     const existing = byProfile.get(row.profileId);
     if (existing) {
@@ -294,8 +311,13 @@ export async function getMonthlySummary(
       existing.baseOre += pay.baseOre;
       existing.obOre += pay.obOre;
       existing.grossOre += pay.grossOre;
-      existing.netOre += flatNet;
-      existing.taxOre += pay.grossOre - flatNet;
+      if (flatNet != null && existing.netOre != null && existing.taxOre != null) {
+        existing.netOre += flatNet;
+        existing.taxOre += pay.grossOre - flatNet;
+      } else {
+        existing.netOre = null;
+        existing.taxOre = null;
+      }
     } else {
       byProfile.set(row.profileId, {
         jobProfileId: row.profileId,
@@ -307,7 +329,7 @@ export async function getMonthlySummary(
         baseOre: pay.baseOre,
         obOre: pay.obOre,
         grossOre: pay.grossOre,
-        taxOre: pay.grossOre - flatNet,
+        taxOre: flatNet == null ? null : pay.grossOre - flatNet,
         netOre: flatNet,
       });
     }
@@ -315,16 +337,15 @@ export async function getMonthlySummary(
 
   const settings = await getTaxSettings(userId);
   grossOre += sickPayOre;
+  // Flat mode: skatta sjuklön per periods jobbprofil (inte snitt av arbetade profiler).
   if (sickPayOre > 0 && !(premium && settings)) {
-    const avgRate =
-      [...byProfile.values()].reduce((s, p) => s + p.taxRate, 0) / Math.max(1, byProfile.size) ||
-      30;
-    flatNetOre += calcNetOre(sickPayOre, avgRate);
+    if (sickFlatIncomplete) flatTaxIncomplete = true;
+    else flatNetOre += sickFlatNetOre;
   }
 
   let taxMode: 'table' | 'flat' = 'flat';
-  let taxOre = grossOre - flatNetOre;
-  let netOre = flatNetOre;
+  let taxOre: number | null = flatTaxIncomplete ? null : grossOre - flatNetOre;
+  let netOre: number | null = flatTaxIncomplete ? null : flatNetOre;
   const profiles = [...byProfile.values()].sort((a, b) => a.name.localeCompare(b.name, 'sv'));
 
   if (premium && settings) {
@@ -349,15 +370,17 @@ export async function getMonthlySummary(
     netOre = grossOre - taxOre;
     allocateNetByGross(profiles, profiles.reduce((s, p) => s + p.grossOre, 0) || 1, netOre);
     for (const profile of profiles) {
-      profile.taxOre = profile.grossOre - profile.netOre;
+      profile.taxOre = profile.grossOre - (profile.netOre ?? 0);
     }
   }
 
   const goalProgressPercent =
-    goalOre && goalOre > 0 ? Math.min(100, Math.round((netOre / goalOre) * 100)) : 0;
+    goalOre && goalOre > 0 && netOre != null
+      ? Math.min(100, Math.round((netOre / goalOre) * 100))
+      : 0;
 
   // Rate-netto exkl. sjuklön så sjukdagar inte snedvrider netto/timme.
-  const rateNetOre = Math.max(0, netOre - sickPayOre);
+  const rateNetOre = netOre == null ? 0 : Math.max(0, netOre - sickPayOre);
 
   let fallbackNetPerHour: number | null = null;
   if (goalOre != null && goalOre > 0 && (paidWorkedMinutes <= 0 || rateNetOre <= 0)) {
