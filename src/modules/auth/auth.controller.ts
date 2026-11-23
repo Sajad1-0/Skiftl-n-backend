@@ -12,7 +12,15 @@ export async function registerController(
     const parsedBody = registerSchema.safeParse(req.body);
 
     if (!parsedBody.success) {
-      next(new AppError(400, 'Ogiltig registreringsdata'));
+      const termsIssue = parsedBody.error.issues.find((issue) =>
+        issue.path.includes('acceptedTerms'),
+      );
+      next(
+        new AppError(
+          400,
+          termsIssue?.message ?? 'Ogiltig registreringsdata',
+        ),
+      );
       return;
     }
 

@@ -5,6 +5,7 @@ export const registerSchema = z.object({
   lastName: z.string().trim().min(2).max(100).optional(),
   email: z.email().trim().toLowerCase(),
   password: z.string().min(8).max(72),
+  acceptedTerms: z.literal(true, { error: 'Du måste godkänna villkor och integritetspolicy' }),
 });
 
 export const loginSchema = z.object({

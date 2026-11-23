@@ -7,10 +7,8 @@ import { db } from '../../db/index.js';
 import { users, type User } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { LoginInput, RegisterInput } from './auth.schema.js';
-import {
-  resolvePremiumAccess,
-  type PremiumSource,
-} from '../../lib/premium/premium.js';
+import { resolvePremiumAccess, type PremiumSource } from '../../lib/premium/premium.js';
+import { CURRENT_TERMS_VERSION } from '../../lib/legal/terms.js';
 
 interface JWTPayload {
   userId: string;
@@ -72,6 +70,10 @@ export async function registerUser(input: RegisterInput): Promise<AuthResponse> 
 
   if (existingUser) throw new AppError(409, 'E-postadressen används redan');
 
+  if (input.acceptedTerms !== true) {
+    throw new AppError(400, 'Du måste godkänna villkor och integritetspolicy');
+  }
+
   const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
   const insertedUsers = await db
@@ -83,6 +85,8 @@ export async function registerUser(input: RegisterInput): Promise<AuthResponse> 
       passwordHash,
       isPremium: false,
       monthlySalaryGoal: null,
+      acceptedTermsAt: new Date(),
+      termsVersion: CURRENT_TERMS_VERSION,
     })
     .returning();
 

@@ -78,6 +78,13 @@
       "when": 1795000000000,
       "tag": "0010_optional_job_profile_tax_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1796000000000,
+      "tag": "0011_user_accepted_terms",
+      "breakpoints": true
     }
   ]
 }

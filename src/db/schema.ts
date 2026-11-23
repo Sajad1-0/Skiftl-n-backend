@@ -29,6 +29,8 @@ export const users = pgTable('users', {
   stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
   stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
   stripeSubscriptionStatus: varchar('stripe_subscription_status', { length: 64 }),
+  acceptedTermsAt: timestamp('accepted_terms_at', { withTimezone: true, mode: 'date' }),
+  termsVersion: varchar('terms_version', { length: 32 }),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
