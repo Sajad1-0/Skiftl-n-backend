@@ -26,6 +26,16 @@ const envSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.string().datetime({ offset: true }).optional(),
   ),
+  /** Tom / saknas = mejl skickas inte (register fungerar ändå). */
+  RESEND_API_KEY: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().min(1).optional(),
+  ),
+  /**
+   * Avsändare, t.ex. `Shiftkit <hej@dindomän.se>`.
+   * Utan egen domän: `Shiftkit <onboarding@resend.dev>` (bara till ditt Resend-konto).
+   */
+  EMAIL_FROM: z.string().default('Shiftkit <onboarding@resend.dev>'),
 });
 
 const parsed = envSchema.safeParse(process.env);

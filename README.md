@@ -42,6 +42,8 @@ cp .env.example .env
 | `STRIPE_PRICE_ID` | Premium monthly Price ID (`price_…`) |
 | `PREMIUM_BYPASS_EMAILS` | Optional comma-separated emails treated as Premium (prefer empty in production) |
 | `PREMIUM_BETA_ENDS_AT` | Optional ISO-8601 end of Premium beta (e.g. `2026-12-15T23:59:59+01:00`). Empty = off. While active, all users get Premium server-side. |
+| `RESEND_API_KEY` | Optional. Without it, registration still works but no emails are sent. |
+| `EMAIL_FROM` | Sender, e.g. `Shiftkit <hej@yourdomain.se>`. Default `Shiftkit <onboarding@resend.dev>` (Resend test sender — only delivers to your Resend account email until you verify a domain). |
 
 ### Database
 

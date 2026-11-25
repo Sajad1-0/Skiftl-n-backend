@@ -7,8 +7,9 @@ import { db } from '../../db/index.js';
 import { users, type User } from '../../db/schema.js';
 import { AppError } from '../../middleware/error.middleware.js';
 import type { LoginInput, RegisterInput } from './auth.schema.js';
-import { resolvePremiumAccess, type PremiumSource } from '../../lib/premium/premium.js';
+import { enqueueOnboardingEmails } from '../../lib/email/send.js';
 import { CURRENT_TERMS_VERSION } from '../../lib/legal/terms.js';
+import { resolvePremiumAccess, type PremiumSource } from '../../lib/premium/premium.js';
 
 interface JWTPayload {
   userId: string;
@@ -93,6 +94,11 @@ export async function registerUser(input: RegisterInput): Promise<AuthResponse> 
   const createdUser = insertedUsers[0];
 
   if (!createdUser) throw new AppError(500, 'Kunde inte skapa användaren');
+
+  enqueueOnboardingEmails({
+    email: createdUser.email,
+    firstName: createdUser.firstName,
+  });
 
   const token = signToken({
     userId: createdUser.id,
